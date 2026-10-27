@@ -49,7 +49,7 @@ class SettingsScreen extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         title: const Text('关于微阅'),
         content: const Text(
-          '微阅 1.0.0（只读版）\n\n'
+          '微阅（只读版）\n\n'
           '非官方第三方客户端，接口来自 weibo.com / m.weibo.cn 网页端逆向整理'
           '（详见仓库文档 WEIBO_API.md 路径 ~/workspace/rea-probe/targets/weibo/）。\n\n'
           '本应用仅供学习交流使用。',

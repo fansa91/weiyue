@@ -66,7 +66,13 @@ jobs:
           EOF
 
       - run: flutter pub get
-      - run: flutter build apk --release --split-per-abi
+      - name: Resolve version from tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.1.0"; fi
+          IFS='.' read -ra P <<< "$V"; while [ ${#P[@]} -lt 3 ]; do P+=(0); done
+          echo "BUILD_NAME=${P[0]}.${P[1]}.${P[2]}" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${{ github.run_number }}" >> "$GITHUB_ENV"
+      - run: flutter build apk --release --split-per-abi --build-name=${{ env.BUILD_NAME }} --build-number=${{ env.BUILD_NUMBER }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -87,7 +93,13 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      - run: flutter build ipa --release --no-codesign
+      - name: Resolve version from tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.1.0"; fi
+          IFS='.' read -ra P <<< "$V"; while [ ${#P[@]} -lt 3 ]; do P+=(0); done
+          echo "BUILD_NAME=${P[0]}.${P[1]}.${P[2]}" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${{ github.run_number }}" >> "$GITHUB_ENV"
+      - run: flutter build ipa --release --no-codesign --build-name=${{ env.BUILD_NAME }} --build-number=${{ env.BUILD_NUMBER }}
 
       - name: Package unsigned IPA (fallback if flutter export missed it)
         run: |
@@ -102,7 +114,7 @@ jobs:
           echo "Packaging $APP_PATH"
           rm -rf /tmp/ipapack && mkdir -p /tmp/ipapack/Payload build/ios/ipa
           cp -R "$APP_PATH" /tmp/ipapack/Payload/
-          cd /tmp/ipapack && zip -qry "$OLDPWD/build/ios/ipa/xyzfm-unsigned.ipa" Payload
+          cd /tmp/ipapack && zip -qry "$OLDPWD/build/ios/ipa/weiyue-unsigned.ipa" Payload
           ls -la "$OLDPWD/build/ios/ipa/"
 
       - uses: actions/upload-artifact@v4
@@ -124,7 +136,13 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      - run: flutter build macos --release
+      - name: Resolve version from tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.1.0"; fi
+          IFS='.' read -ra P <<< "$V"; while [ ${#P[@]} -lt 3 ]; do P+=(0); done
+          echo "BUILD_NAME=${P[0]}.${P[1]}.${P[2]}" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${{ github.run_number }}" >> "$GITHUB_ENV"
+      - run: flutter build macos --release --build-name=${{ env.BUILD_NAME }} --build-number=${{ env.BUILD_NUMBER }}
 
       - name: Create DMG
         run: |
@@ -135,14 +153,14 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then VERSION="${GITHUB_REF#refs/tags/v}"; else VERSION="dev"; fi
           mkdir -p dist
           create-dmg \
-            --volname "云音乐" \
+            --volname "微阅" \
             --window-pos 200 120 \
             --window-size 640 400 \
             --icon-size 100 \
             --icon "$APP_NAME" 175 120 \
             --hide-extension "$APP_NAME" \
             --app-drop-link 475 120 \
-            "dist/xyzfm-${VERSION}-macos.dmg" \
+            "dist/weiyue-${VERSION}-macos.dmg" \
             "$APP_PATH"
 
       - uses: actions/upload-artifact@v4
@@ -225,17 +243,17 @@ jobs:
 #          rm -rf AppDir
 #          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/512x512/apps
 #          cp -r build/linux/x64/release/bundle/* AppDir/usr/bin/
-#          cp packaging/linux/xyzfm.desktop AppDir/usr/share/applications/
-#          cp packaging/linux/icon.png AppDir/usr/share/icons/hicolor/512x512/apps/xyzfm.png
+#          cp packaging/linux/weiyue.desktop AppDir/usr/share/applications/
+#          cp packaging/linux/icon.png AppDir/usr/share/icons/hicolor/512x512/apps/weiyue.png
 #          cat > AppDir/AppRun <<'EOF'
 #          #!/bin/sh
 #          HERE="$(dirname "$(readlink -f "$0")")"
-#          exec "$HERE/usr/bin/xyzfm" "$@"
+#          exec "$HERE/usr/bin/weiyue" "$@"
 #          EOF
 #          chmod +x AppDir/AppRun
-#          ln -sf usr/share/applications/xyzfm.desktop AppDir/xyzfm.desktop
-#          ln -sf usr/share/icons/hicolor/512x512/apps/xyzfm.png AppDir/xyzfm.png
-#          /tmp/appimagetool AppDir "dist/xyzfm-${VERSION}-x86_64.AppImage"
+#          ln -sf usr/share/applications/weiyue.desktop AppDir/weiyue.desktop
+#          ln -sf usr/share/icons/hicolor/512x512/apps/weiyue.png AppDir/weiyue.png
+#          /tmp/appimagetool AppDir "dist/weiyue-${VERSION}-x86_64.AppImage"
 #
 #      - uses: actions/upload-artifact@v4
 #        with:
@@ -256,14 +274,21 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      - run: flutter build windows --release
+      - name: Resolve version from tag
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -match '^refs/tags/v(.+)$') { $v = $Matches[1] } else { $v = '0.1.0' }
+          $p = $v.Split('.'); while ($p.Count -lt 3) { $p += '0' }
+          "BUILD_NAME=$($p -join '.')" | Out-File -Append $env:GITHUB_ENV
+          "BUILD_NUMBER=${{ github.run_number }}" | Out-File -Append $env:GITHUB_ENV
+      - run: flutter build windows --release --build-name=${{ env.BUILD_NAME }} --build-number=${{ env.BUILD_NUMBER }}
 
       - name: Zip
         shell: pwsh
         run: |
           if ($env:GITHUB_REF -match '^refs/tags/v(.+)$') { $version = $Matches[1] } else { $version = 'dev' }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "dist\xyzfm-$version-windows-x64.zip"
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath "dist\weiyue-$version-windows-x64.zip"
 
       - uses: actions/upload-artifact@v4
         with:
