@@ -3,6 +3,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 
 import 'core/ime.dart';
+import 'core/scroll_signal.dart';
 import 'core/theme.dart';
 import 'screens/discover_screen.dart';
 import 'screens/home_screen.dart';
@@ -111,6 +112,16 @@ class _AppShellState extends State<AppShell> {
     (Icons.person_outline, Icons.person, '我的'),
   ];
 
+  /// 栏位切换：已在首页时再次点「首页」不切页，改为发回顶信号，
+  /// 让首页当前分类的信息流滚回顶部（底部栏/侧边栏共用）。
+  void _onDestinationSelected(int i) {
+    if (i == 0 && _tabIndex == 0) {
+      signalHomeTop();
+      return;
+    }
+    setState(() => _tabIndex = i);
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -121,8 +132,7 @@ class _AppShellState extends State<AppShell> {
               children: [
                 NavigationRail(
                   selectedIndex: _tabIndex,
-                  onDestinationSelected: (i) =>
-                      setState(() => _tabIndex = i),
+                  onDestinationSelected: _onDestinationSelected,
                   labelType: NavigationRailLabelType.all,
                   destinations: [
                     for (final (icon, selectedIcon, label) in _destinations)
@@ -145,7 +155,7 @@ class _AppShellState extends State<AppShell> {
           body: IndexedStack(index: _tabIndex, children: _tabs),
           bottomNavigationBar: NavigationBar(
             selectedIndex: _tabIndex,
-            onDestinationSelected: (i) => setState(() => _tabIndex = i),
+            onDestinationSelected: _onDestinationSelected,
             destinations: [
               for (final (icon, selectedIcon, label) in _destinations)
                 NavigationDestination(

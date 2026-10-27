@@ -5,6 +5,7 @@ import '../core/nav.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
 import '../services/weiyue_service.dart';
+import '../widgets/inline_player.dart';
 import '../widgets/status_card.dart';
 import '../widgets/user_tile.dart';
 
@@ -19,11 +20,19 @@ enum _CommentSort {
   const _CommentSort(this.label);
 }
 
-/// 微博详情：完整卡 + 长文补全 + 相关视频 + 评论（热评）+ 点赞列表。
+/// 微博详情：完整卡 + 长文补全 + 评论（热评）+ 点赞列表 + 相关视频页签。
 /// 转发列表访客不可见（服务端挡），做占位说明。
 class DetailScreen extends StatefulWidget {
   final WbStatus status;
-  const DetailScreen({super.key, required this.status});
+
+  /// 内嵌播放器后端工厂（测试缝）；null 时用 media_kit 真实后端。
+  final InlinePlaybackFactory? inlinePlaybackFactory;
+
+  const DetailScreen({
+    super.key,
+    required this.status,
+    this.inlinePlaybackFactory,
+  });
 
   @override
   State<DetailScreen> createState() => _DetailScreenState();
@@ -116,28 +125,27 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
-  /// 帖子正文 + 相关视频（窄屏与宽屏左栏共用同一批子 widget）。
-  List<Widget> _buildStatusAndRelated(BuildContext context) {
+  /// 帖子正文（窄屏与宽屏左栏共用）。视频帖在卡内封面位置
+  /// 换成内嵌播放器，进入详情即按设置自动播放预览。
+  List<Widget> _buildStatusOnly(BuildContext context) {
     return [
-      StatusCard(status: _status, tappable: false, expanded: true),
-      if (_related.isNotEmpty) ...[
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-          child:
-              Text('相关视频', style: Theme.of(context).textTheme.titleMedium),
-        ),
-        for (final s in _related)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: StatusCard(status: s),
-          ),
-      ],
+      StatusCard(
+        status: _status,
+        tappable: false,
+        expanded: true,
+        videoOverride: _status.hasVideo
+            ? InlineVideoPlayer(
+                key: ValueKey('inline-player-${_status.id}'),
+                status: _status,
+                playbackFactory: widget.inlinePlaybackFactory,
+              )
+            : null,
+      ),
     ];
   }
 
-  /// 评论/点赞/转发三页签。窄屏用固定高 520；宽屏右栏 [fillHeight]
-  /// 时用 Expanded 撑满面板高度，各页签列表独立滚动。
+  /// 评论/点赞/转发/相关视频四页签。窄屏用固定高 520；宽屏右栏
+  /// [fillHeight] 时用 Expanded 撑满面板高度，各页签列表独立滚动。
   Widget _buildTabs(ColorScheme cs, {bool fillHeight = false}) {
     final tabBarView = TabBarView(
       children: [
@@ -152,18 +160,22 @@ class _DetailScreenState extends State<DetailScreen> {
             ),
           ),
         ),
+        _buildRelated(),
       ],
     );
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Column(
         children: [
           TabBar(
             labelColor: cs.primary,
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             tabs: [
               Tab(text: '评论 ${_status.commentsCount}'),
               Tab(text: '点赞 ${_status.attitudesCount}'),
               Tab(text: '转发 ${_status.repostsCount}'),
+              const Tab(text: '相关视频'),
             ],
           ),
           if (fillHeight)
@@ -172,6 +184,23 @@ class _DetailScreenState extends State<DetailScreen> {
             SizedBox(height: 520, child: tabBarView),
         ],
       ),
+    );
+  }
+
+  /// 相关视频页签：原帖子下方区块改入页签栏，独立滚动。
+  Widget _buildRelated() {
+    if (_related.isEmpty) {
+      return const Center(child: Text('暂无相关视频'));
+    }
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      children: [
+        for (final s in _related)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: StatusCard(status: s),
+          ),
+      ],
     );
   }
 
@@ -191,7 +220,7 @@ class _DetailScreenState extends State<DetailScreen> {
                   child: ListView(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    children: _buildStatusAndRelated(context),
+                    children: _buildStatusOnly(context),
                   ),
                 ),
                 Container(
@@ -209,7 +238,7 @@ class _DetailScreenState extends State<DetailScreen> {
           return ListView(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             children: [
-              ..._buildStatusAndRelated(context),
+              ..._buildStatusOnly(context),
               const SizedBox(height: 8),
               _buildTabs(cs),
             ],

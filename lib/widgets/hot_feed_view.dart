@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:provider/provider.dart';
 
+import '../core/scroll_signal.dart';
 import '../models/models.dart';
 import '../services/weiyue_service.dart';
 import 'status_card.dart';
@@ -13,11 +14,15 @@ class HotFeedView extends StatefulWidget {
   final bool Function(WbStatus status)? filter;
   final String emptyText;
 
+  /// 监听「再次点击首页」回顶信号（仅首页开启，视频页等保持默认关）。
+  final bool homeTopSignalEnabled;
+
   const HotFeedView({
     super.key,
     required this.channel,
     this.filter,
     this.emptyText = '暂无内容',
+    this.homeTopSignalEnabled = false,
   });
 
   @override
@@ -38,13 +43,29 @@ class _HotFeedViewState extends State<HotFeedView> {
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    if (widget.homeTopSignalEnabled) {
+      homeTopSignal.addListener(_onHomeTopSignal);
+    }
     _loadFirst();
   }
 
   @override
   void dispose() {
+    if (widget.homeTopSignalEnabled) {
+      homeTopSignal.removeListener(_onHomeTopSignal);
+    }
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// 回顶信号：窄屏列表与宽屏瀑布流共用同一 _scroll，平滑滚回顶部。
+  void _onHomeTopSignal() {
+    if (!_scroll.hasClients) return;
+    _scroll.animateTo(
+      0,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOut,
+    );
   }
 
   void _onScroll() {

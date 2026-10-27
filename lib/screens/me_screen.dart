@@ -97,6 +97,15 @@ class _MeScreenState extends State<MeScreen> {
                 ),
               ),
               const SizedBox(height: 12),
+              // 访客模式说明（原设置页文案移至此处）
+              const ListTile(
+                leading: Icon(Icons.lock_outline),
+                title: Text('访客模式说明'),
+                subtitle: Text('本应用以访客身份只读访问平台公开接口，'
+                    '不收集账号密码；评论仅显示热评，转发列表与关注流需登录后查看；'
+                    '访客模式下不能发帖、评论、点赞等写操作。'),
+              ),
+              const Divider(height: 1, indent: 16, endIndent: 16),
               ListTile(
                 leading: const Icon(Icons.settings_outlined),
                 title: const Text('设置'),

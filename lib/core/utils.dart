@@ -72,3 +72,12 @@ int intOf(dynamic v) {
   if (v is String) return int.tryParse(v) ?? 0;
   return 0;
 }
+
+/// 视频是否为横屏尺寸（宽 > 高）。宽高未知（任一为 null 或 <=0）按非横屏处理，
+/// 播放器据此决定移动端全屏方向：横屏视频才强制横屏，竖屏/方形保持竖屏。
+bool isLandscapeVideoSize(int? width, int? height) {
+  if (width == null || height == null || width <= 0 || height <= 0) {
+    return false;
+  }
+  return width > height;
+}

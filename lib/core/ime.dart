@@ -5,7 +5,7 @@ import 'package:flutter_ime/flutter_ime.dart' as flutter_ime;
 
 /// 桌面端系统输入法（IME）缓解。
 ///
-/// 背景：Windows 发布包里，进过视频播放页（media_kit 的 mpv 原生窗口）后，
+/// 背景：Windows 发布包里，视频播放（media_kit 的 mpv 原生窗口）后，
 /// 回到搜索框可能无法用系统输入法打中文——怀疑是 mpv 的原生子窗口把
 /// IME 上下文从 Flutter 主窗口分离了，焦点回到文本框时 IME 没有重新关联。
 ///

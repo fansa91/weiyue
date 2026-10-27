@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_image_mock/network_image_mock.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:weiyue/core/scroll_signal.dart';
 import 'package:weiyue/main.dart';
 import 'package:weiyue/models/models.dart';
 import 'package:weiyue/screens/detail_screen.dart';
@@ -9,6 +11,8 @@ import 'package:weiyue/screens/discover_screen.dart';
 import 'package:weiyue/screens/home_screen.dart';
 import 'package:weiyue/screens/me_screen.dart';
 import 'package:weiyue/screens/profile_screen.dart';
+import 'package:weiyue/screens/settings_screen.dart';
+import 'package:weiyue/services/settings_service.dart';
 import 'package:weiyue/widgets/hot_feed_view.dart';
 
 import '../helpers/fakes.dart';
@@ -211,8 +215,103 @@ void main() {
     await _settle(tester);
     expect(find.textContaining('已就绪'), findsNWidgets(2));
     expect(find.text('刷新访客身份'), findsOneWidget);
+    expect(find.text('访客模式说明'), findsOneWidget);
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('主题与外观'), findsOneWidget);
+  });
+
+  testWidgets('SettingsScreen：仅设置项+视频自动播放开关，无关于/访客说明',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final settings = await tester.runAsync(() async {
+      final s = SettingsService();
+      await s.init();
+      return s;
+    });
+    await tester.pumpWidget(
+        wrapWithProviders(const SettingsScreen(), settings: settings));
+    await _settle(tester);
+    expect(find.text('外观'), findsOneWidget);
+    expect(find.text('视频自动播放'), findsOneWidget);
+    expect(find.text('关于微阅'), findsNothing);
+    expect(find.text('访客模式说明'), findsNothing);
+    // 开关可切换并落到 SettingsService
+    expect(settings!.videoAutoplay, isTrue);
+    await tester.tap(find.byType(Switch));
+    await _settle(tester);
+    expect(settings.videoAutoplay, isFalse);
+  });
+
+  testWidgets('DetailScreen：相关视频在第四页签内，不再夹在正文与页签之间',
+      (tester) async {
+    await mockNetworkImagesFor(() async {
+      final status = makeStatus(id: '9', text: '视频帖', video: true);
+      await tester.pumpWidget(wrapWithProviders(
+        DetailScreen(status: status),
+        weibo: _RelatedFakeService(),
+      ));
+      await _settle(tester);
+      // 视频区域较高，页签栏在首屏下方，先滚动外层列表使其构建出来
+      await tester.drag(find.byType(ListView).first, const Offset(0, -350));
+      await _settle(tester);
+      // 页签栏有「相关视频」，且列表内容默认不在正文下方直接露出
+      expect(find.text('相关视频'), findsOneWidget);
+      expect(find.textContaining('相关视频条目一', findRichText: true),
+          findsNothing);
+      // 切到相关视频页签后条目可见
+      await tester.tap(find.text('相关视频'));
+      await _settle(tester);
+      expect(find.textContaining('相关视频条目一', findRichText: true),
+          findsOneWidget);
+    });
+  });
+
+  testWidgets('DetailScreen：无相关视频时页签显示占位', (tester) async {
+    await mockNetworkImagesFor(() async {
+      final status = makeStatus(id: '9', text: '视频帖', video: true);
+      await tester.pumpWidget(wrapWithProviders(
+        DetailScreen(status: status),
+        weibo: _NoRelatedFakeService(),
+      ));
+      await _settle(tester);
+      await tester.drag(find.byType(ListView).first, const Offset(0, -350));
+      await _settle(tester);
+      await tester.tap(find.text('相关视频'));
+      await _settle(tester);
+      expect(find.text('暂无相关视频'), findsOneWidget);
+    });
+  });
+
+  testWidgets('HotFeedView：首页回顶信号让已滚动的列表平滑回顶', (tester) async {
+    await mockNetworkImagesFor(() async {
+      final fake = FakeWeiyueService()
+        ..feedItems = [
+          for (var i = 0; i < 12; i++)
+            makeStatus(id: 't$i', text: '回顶测试第 $i 条'),
+        ];
+      await tester.pumpWidget(wrapWithProviders(
+        const HotFeedView(channel: _hotChannel, homeTopSignalEnabled: true),
+        weibo: fake,
+      ));
+      await _settle(tester);
+      final scrollable = find
+          .descendant(
+              of: find.byType(HotFeedView), matching: find.byType(Scrollable))
+          .first;
+      double pixels() =>
+          tester.state<ScrollableState>(scrollable).position.pixels;
+      expect(pixels(), 0);
+      // 向下滚动一段
+      await tester.drag(find.byType(HotFeedView), const Offset(0, -400));
+      await tester.pump();
+      expect(pixels(), greaterThan(0));
+      // 发回顶信号 → 动画回顶
+      homeTopSignal.value++;
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+      expect(pixels(), 0);
+    });
   });
 
   testWidgets('MeScreen：无 SUB 显示未获取', (tester) async {
@@ -247,6 +346,25 @@ void main() {
       expect(find.text('刷新访客身份'), findsOneWidget);
     });
   });
+}
+
+/// 相关视频页签测试专用假服务：详情刷新返回带视频的帖
+/// （保证 _status.hasVideo 触发相关视频加载），且有一条相关视频。
+class _RelatedFakeService extends FakeWeiyueService {
+  @override
+  Future<WbStatus> getStatus(String id) async => makeStatus(
+      id: id, text: '详情全文内容', comments: 122, attitudes: 881, video: true);
+
+  @override
+  Future<List<WbStatus>> getRelatedVideos(String mid, {int page = 1}) async =>
+      [makeStatus(id: 'r1', text: '相关视频条目一', video: true)];
+}
+
+/// 无相关视频版：其余同上，相关视频走父类默认空列表。
+class _NoRelatedFakeService extends FakeWeiyueService {
+  @override
+  Future<WbStatus> getStatus(String id) async => makeStatus(
+      id: id, text: '详情全文内容', comments: 122, attitudes: 881, video: true);
 }
 
 /// 评论排序测试专用假服务：3 条评论，时间/点赞各不相同，

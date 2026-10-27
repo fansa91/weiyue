@@ -91,6 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         key: ValueKey(
                             '${_selected!.gid}_${_selected!.containerid}'),
                         channel: _selected!,
+                        homeTopSignalEnabled: true,
                       ),
               ),
             ],

@@ -279,6 +279,7 @@ Widget wrapWithProviders(
   Widget child, {
   FakeWeiyueService? weibo,
   FakeVisitorService? visitor,
+  SettingsService? settings,
 }) {
   final wb = weibo ?? FakeWeiyueService();
   final vs = visitor ?? FakeVisitorService();
@@ -287,7 +288,7 @@ Widget wrapWithProviders(
       ChangeNotifierProvider<VisitorService>.value(value: vs),
       Provider<WeiyueService>.value(value: wb),
       ChangeNotifierProvider<SettingsService>(
-          create: (_) => SettingsService()),
+          create: (_) => settings ?? SettingsService()),
     ],
     child: MaterialApp(
       theme: buildTheme(

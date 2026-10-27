@@ -78,4 +78,21 @@ void main() {
       expect(cleanSource('微博网页版'), '微博网页版');
     });
   });
+
+  group('isLandscapeVideoSize', () {
+    test('宽大于高为横屏', () {
+      expect(isLandscapeVideoSize(1280, 720), isTrue);
+      expect(isLandscapeVideoSize(1920, 1080), isTrue);
+    });
+    test('竖屏与方形不是横屏', () {
+      expect(isLandscapeVideoSize(720, 1280), isFalse);
+      expect(isLandscapeVideoSize(1080, 1080), isFalse);
+    });
+    test('未知尺寸（null/0）按非横屏处理', () {
+      expect(isLandscapeVideoSize(null, 720), isFalse);
+      expect(isLandscapeVideoSize(1280, null), isFalse);
+      expect(isLandscapeVideoSize(0, 0), isFalse);
+      expect(isLandscapeVideoSize(null, null), isFalse);
+    });
+  });
 }

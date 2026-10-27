@@ -11,6 +11,7 @@ class SettingsService extends ChangeNotifier {
   static const _keyPureBlack = 'pure_black';
   static const _keyCustomColors = 'custom_colors';
   static const _keyWaveformProgress = 'waveform_progress';
+  static const _keyVideoAutoplay = 'video_autoplay';
 
   /// 预设主题色
   static const List<ThemePreset> themePresets = [
@@ -43,6 +44,10 @@ class SettingsService extends ChangeNotifier {
   /// 波浪形进度条（播放器进度条显示为波形样式）
   bool _waveformProgress = false;
   bool get waveformProgress => _waveformProgress;
+
+  /// 视频自动播放：打开视频详情时内嵌预览是否自动播放，默认开
+  bool _videoAutoplay = true;
+  bool get videoAutoplay => _videoAutoplay;
 
   /// M3 动态取色（跟随系统壁纸，Android 12+ 有效），默认开启
   bool _dynamicColor = true;
@@ -82,6 +87,7 @@ class SettingsService extends ChangeNotifier {
     _customColors =
         _prefs.getStringList(_keyCustomColors)?.map(int.parse).toList() ?? [];
     _waveformProgress = _prefs.getBool(_keyWaveformProgress) ?? false;
+    _videoAutoplay = _prefs.getBool(_keyVideoAutoplay) ?? true;
   }
 
   /// 通过系统 CorePalette 取种子色，M3 明暗主题分别用 fromSeed 生成
@@ -135,6 +141,13 @@ class SettingsService extends ChangeNotifier {
     if (value == _waveformProgress) return;
     _waveformProgress = value;
     await _prefs.setBool(_keyWaveformProgress, value);
+    notifyListeners();
+  }
+
+  Future<void> setVideoAutoplay(bool value) async {
+    if (value == _videoAutoplay) return;
+    _videoAutoplay = value;
+    await _prefs.setBool(_keyVideoAutoplay, value);
     notifyListeners();
   }
 

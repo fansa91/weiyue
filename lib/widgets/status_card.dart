@@ -87,11 +87,16 @@ class StatusCard extends StatelessWidget {
   /// 详情页用完整正文
   final bool expanded;
 
+  /// 详情页可传入内嵌播放器替代视频封面（封面位置直接预览播放）；
+  /// 列表态不传，保持封面 + 播放图标，避免列表出现多个播放器。
+  final Widget? videoOverride;
+
   const StatusCard({
     super.key,
     required this.status,
     this.tappable = true,
     this.expanded = false,
+    this.videoOverride,
   });
 
   @override
@@ -181,10 +186,10 @@ class StatusCard extends StatelessWidget {
             const SizedBox(height: 8),
             _PicGrid(pics: status.pics),
           ],
-          // 视频封面
+          // 视频封面（详情页传 videoOverride 时换成内嵌播放器）
           if (status.hasVideo) ...[
             const SizedBox(height: 8),
-            _VideoCover(status: status),
+            videoOverride ?? _VideoCover(status: status),
           ],
           const SizedBox(height: 6),
           // 底栏计数
@@ -376,7 +381,8 @@ class _VideoCover extends StatelessWidget {
   Widget build(BuildContext context) {
     final video = status.video!;
     return GestureDetector(
-      onTap: () => openPlayer(context, status),
+      // 点封面进详情页内嵌预览播放，不再跳独立播放页
+      onTap: () => openDetail(context, status),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: AspectRatio(

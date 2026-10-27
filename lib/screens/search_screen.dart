@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/ime.dart';
 import '../models/models.dart';
@@ -22,6 +23,9 @@ class SearchScreen extends StatefulWidget {
 }
 
 class _SearchScreenState extends State<SearchScreen> {
+  static const _historyKey = 'weiyue_search_history';
+  static const _historyLimit = 12;
+
   late final _controller = TextEditingController(text: widget.initialKeyword);
   final _searchFocus = FocusNode();
   SearchResult? _result;
@@ -29,12 +33,14 @@ class _SearchScreenState extends State<SearchScreen> {
   String? _error;
   String _keyword = '';
   int _segment = 0; // 0 综合 1 用户 2 微博
+  List<String> _history = const [];
 
   @override
   void initState() {
     super.initState();
+    _loadHistory();
     // 桌面端 IME 缓解：搜索框获焦时把 IME 重新关联回窗口
-    //（进过播放页后 mpv 原生窗口可能把 IME 上下文分离，见 core/ime.dart）。
+    //（播放器原生窗口可能把 IME 上下文分离，见 core/ime.dart）。
     _searchFocus.addListener(() {
       if (_searchFocus.hasFocus) ensureImeAttached();
     });
@@ -52,9 +58,56 @@ class _SearchScreenState extends State<SearchScreen> {
     super.dispose();
   }
 
+  Future<void> _loadHistory() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getStringList(_historyKey) ?? const [];
+      if (mounted) setState(() => _history = saved);
+    } catch (_) {
+      // 历史读取失败不影响搜索功能
+    }
+  }
+
+  /// 提交搜索时记录：最新在前、去重、上限 [_historyLimit] 条。
+  Future<void> _recordHistory(String keyword) async {
+    final next = <String>[
+      keyword,
+      for (final h in _history)
+        if (h != keyword) h,
+    ].take(_historyLimit).toList();
+    if (mounted) setState(() => _history = next);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_historyKey, next);
+    } catch (_) {}
+  }
+
+  Future<void> _clearHistory() async {
+    if (mounted) setState(() => _history = const []);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_historyKey);
+    } catch (_) {}
+  }
+
+  Future<void> _removeHistoryItem(String keyword) async {
+    final next = _history.where((h) => h != keyword).toList();
+    if (mounted) setState(() => _history = next);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_historyKey, next);
+    } catch (_) {}
+  }
+
+  void _searchFromHistory(String keyword) {
+    _controller.text = keyword;
+    _doSearch(keyword);
+  }
+
   Future<void> _doSearch(String kw) async {
     final keyword = kw.trim();
     if (keyword.isEmpty) return;
+    _recordHistory(keyword);
     FocusScope.of(context).unfocus();
     setState(() {
       _loading = true;
@@ -154,7 +207,7 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     final result = _result;
     if (result == null) {
-      return const Center(child: Text('输入关键词搜索动态与用户'));
+      return _buildHistoryOrHint();
     }
     final showUsers = _segment != 2;
     final showStatuses = _segment != 1;
@@ -176,5 +229,47 @@ class _SearchScreenState extends State<SearchScreen> {
       return const Center(child: Text('没有找到相关结果'));
     }
     return ListView(children: children);
+  }
+
+  /// 无结果时：有历史则展示「搜索历史」区（点击直达搜索，
+  /// 支持单条删除与一键清空），没有历史则展示输入提示。
+  Widget _buildHistoryOrHint() {
+    if (_history.isEmpty) {
+      return const Center(child: Text('输入关键词搜索动态与用户'));
+    }
+    final cs = Theme.of(context).colorScheme;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      children: [
+        Row(
+          children: [
+            Icon(Icons.history, size: 18, color: cs.onSurfaceVariant),
+            const SizedBox(width: 6),
+            const Text('搜索历史',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            TextButton(
+              onPressed: _clearHistory,
+              child: const Text('清空'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final h in _history)
+              InputChip(
+                label: Text(h),
+                onPressed: () => _searchFromHistory(h),
+                onDeleted: () => _removeHistoryItem(h),
+                deleteIcon: const Icon(Icons.close, size: 16),
+                visualDensity: VisualDensity.compact,
+              ),
+          ],
+        ),
+      ],
+    );
   }
 }
