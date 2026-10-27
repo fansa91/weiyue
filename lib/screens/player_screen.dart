@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
+
+import '../core/ime.dart';
 
 import '../core/utils.dart';
 import '../models/models.dart';
@@ -35,6 +39,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     _player.dispose();
+    // Windows IME 缓解③：退出播放页时兜底把 IME 重新关联回主窗口，
+    // 防止 mpv 原生窗口销毁后 IME 上下文悬空、回搜索框打不了中文。
+    unawaited(ensureImeAttached());
     super.dispose();
   }
 

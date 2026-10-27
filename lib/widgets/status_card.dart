@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/nav.dart';
 import '../core/utils.dart';
@@ -64,6 +65,16 @@ class WbRichText extends StatelessWidget {
       overflow: maxLines != null ? TextOverflow.ellipsis : TextOverflow.clip,
     );
   }
+}
+
+/// 平台标准帖子链接：优先 https://weibo.com/{作者uid}/{mblogid}；
+/// mblogid 为空（或作者缺失）时退到 https://weibo.com/detail/{id}。
+String wbStatusUrl(WbStatus status) {
+  final uid = status.user?.id;
+  if (status.mblogid.isNotEmpty && uid != null && uid > 0) {
+    return 'https://weibo.com/$uid/${status.mblogid}';
+  }
+  return 'https://weibo.com/detail/${status.id}';
 }
 
 /// 微博卡片：头像行 / 正文 / 转发内嵌卡 / 图片宫格 / 视频封面 / 底栏计数。
@@ -192,6 +203,27 @@ class StatusCard extends StatelessWidget {
                 Text('${formatPlayCount(status.readsCount)} 阅读',
                     style:
                         TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+              // 分享：复制帖子链接（独立 IconButton，自行处理点击，
+              // 不触发整卡进详情的 InkWell 手势）
+              IconButton(
+                icon: const Icon(Icons.share_outlined, size: 19),
+                color: cs.onSurfaceVariant,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.only(left: 6),
+                constraints:
+                    const BoxConstraints(minWidth: 30, minHeight: 30),
+                tooltip: '复制链接',
+                onPressed: () async {
+                  await Clipboard.setData(
+                      ClipboardData(text: wbStatusUrl(status)));
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context)
+                      ..hideCurrentSnackBar()
+                      ..showSnackBar(
+                          const SnackBar(content: Text('链接已复制')));
+                  }
+                },
+              ),
             ],
           ),
         ],

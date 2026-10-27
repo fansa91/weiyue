@@ -1,7 +1,10 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_image_mock/network_image_mock.dart';
+import 'package:weiyue/models/models.dart';
+import 'package:weiyue/screens/detail_screen.dart';
 import 'package:weiyue/widgets/status_card.dart';
 
 import '../helpers/fakes.dart';
@@ -81,5 +84,42 @@ void main() {
         tester, makeStatus(text: '长文全文……', isLongText: true),
         tappable: false, expanded: true);
     expect(find.text('全文'), findsNothing);
+  });
+
+  testWidgets('分享按钮：复制帖子链接到剪贴板且不进详情', (tester) async {
+    String? clipboardText;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') {
+        clipboardText =
+            (call.arguments as Map<dynamic, dynamic>)['text'] as String?;
+      }
+      return null;
+    });
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+
+    await _pumpCard(tester, makeStatus(id: '1001'));
+    await tester.tap(find.byIcon(Icons.share_outlined));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    // makeStatus 约定：mblogid = 'AbC{id}'，作者 uid = 42
+    expect(clipboardText, 'https://weibo.com/42/AbC1001');
+    expect(find.text('链接已复制'), findsOneWidget);
+    // 分享按钮自行拦截点击：整卡跳转没有被触发，详情页未推入
+    expect(find.byType(DetailScreen), findsNothing);
+  });
+
+  test('wbStatusUrl：mblogid 为空时退详情式链接', () {
+    final noMblogid = WbStatus(
+      id: '777',
+      mblogid: '',
+      user: makeStatus().user,
+      text: 'x',
+    );
+    expect(wbStatusUrl(noMblogid), 'https://weibo.com/detail/777');
+    expect(wbStatusUrl(makeStatus(id: '1001')),
+        'https://weibo.com/42/AbC1001');
   });
 }

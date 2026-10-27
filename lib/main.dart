@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 
+import 'core/ime.dart';
 import 'core/theme.dart';
 import 'screens/discover_screen.dart';
 import 'screens/home_screen.dart';
@@ -37,6 +38,12 @@ void main() async {
       child: const WeiyueApp(),
     ),
   );
+
+  // Windows IME 缓解①：启动首帧后先把 IME 上下文关联回主窗口，
+  // 避免原生插件初始化顺序导致一进应用就无法调起中文输入法。
+  //（非 Windows 平台 ensureImeAttached 内部直接跳过。）
+  WidgetsBinding.instance
+      .addPostFrameCallback((_) => ensureImeAttached());
 }
 
 class WeiyueApp extends StatelessWidget {

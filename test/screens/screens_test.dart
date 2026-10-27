@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_image_mock/network_image_mock.dart';
 import 'package:weiyue/main.dart';
+import 'package:weiyue/models/models.dart';
 import 'package:weiyue/screens/detail_screen.dart';
 import 'package:weiyue/screens/discover_screen.dart';
 import 'package:weiyue/screens/home_screen.dart';
 import 'package:weiyue/screens/me_screen.dart';
 import 'package:weiyue/screens/profile_screen.dart';
+import 'package:weiyue/widgets/hot_feed_view.dart';
 
 import '../helpers/fakes.dart';
 
@@ -15,6 +18,16 @@ Future<void> _settle(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 300));
   await tester.pump();
 }
+
+/// 切到桌面宽屏尺寸（逻辑像素），测试结束自动恢复。
+void _useWideView(WidgetTester tester, Size size) {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.reset);
+}
+
+const _hotChannel =
+    WbChannel(gid: '102803', title: '热门', containerid: '102803');
 
 void main() {
   testWidgets('HomeScreen：分类 chips 与 feed 列表渲染', (tester) async {
@@ -64,6 +77,99 @@ void main() {
       expect(find.textContaining('这是一条热评', findRichText: true),
           findsOneWidget);
       expect(find.textContaining('转发列表访客不可见'), findsNothing);
+    });
+  });
+
+  testWidgets('DetailScreen 宽屏：左右双栏，评论面板在右侧', (tester) async {
+    await mockNetworkImagesFor(() async {
+      _useWideView(tester, const Size(1600, 900));
+      final status = makeStatus(id: '9', text: '详情页原文', comments: 122);
+      await tester.pumpWidget(wrapWithProviders(DetailScreen(status: status)));
+      await _settle(tester);
+      // 正文与评论（横幅+热评）在双栏下同时可见
+      final body = find.textContaining('详情全文内容', findRichText: true);
+      final comment = find.textContaining('这是一条热评', findRichText: true);
+      expect(body, findsOneWidget);
+      expect(find.textContaining('访客仅显示热评'), findsOneWidget);
+      expect(comment, findsOneWidget);
+      // 评论面板在正文右侧
+      expect(tester.getCenter(comment).dx,
+          greaterThan(tester.getCenter(body).dx));
+    });
+  });
+
+  testWidgets('DetailScreen：评论排序切换改变列表顺序', (tester) async {
+    await mockNetworkImagesFor(() async {
+      final status = makeStatus(id: '9', text: '详情页原文', comments: 3);
+      await tester.pumpWidget(wrapWithProviders(
+        DetailScreen(status: status),
+        weibo: _SortableFakeService(),
+      ));
+      await _settle(tester);
+      double dyOf(String text) => tester.getTopLeft(find.text(text)).dy;
+      // 排序控件定位：按钮本体 + 以 PopupMenuItem 为祖先的菜单项文本
+      //（避免与排序栏当前值标签同名冲突）
+      final sortToggle =
+          find.byWidgetPredicate((w) => w is PopupMenuButton);
+      Finder menuItem(String label) => find.ancestor(
+            of: find.text(label),
+            matching: find.byWidgetPredicate((w) => w is PopupMenuItem),
+          );
+      // 默认（服务端顺序）：甲 15:00 → 乙 10:00 → 丙 12:00
+      expect(dyOf('评论甲最新'), lessThan(dyOf('评论乙最早高赞')));
+      expect(dyOf('评论乙最早高赞'), lessThan(dyOf('评论丙中间')));
+      // 切「最早」（时间正序）：乙 → 丙 → 甲，首尾互换
+      await tester.tap(sortToggle);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(menuItem('最早'));
+      await _settle(tester);
+      expect(dyOf('评论乙最早高赞'), lessThan(dyOf('评论丙中间')));
+      expect(dyOf('评论丙中间'), lessThan(dyOf('评论甲最新')));
+      // 切「最多点赞」：乙（50 赞）置顶，其次甲（5）、丙（1）
+      await tester.tap(sortToggle);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(menuItem('最多点赞'));
+      await _settle(tester);
+      expect(dyOf('评论乙最早高赞'), lessThan(dyOf('评论甲最新')));
+      expect(dyOf('评论甲最新'), lessThan(dyOf('评论丙中间')));
+    });
+  });
+
+  testWidgets('HotFeedView 宽屏：瀑布流多列', (tester) async {
+    await mockNetworkImagesFor(() async {
+      _useWideView(tester, const Size(1600, 900));
+      await tester.pumpWidget(
+          wrapWithProviders(const HotFeedView(channel: _hotChannel)));
+      await _settle(tester);
+      expect(find.byType(SliverMasonryGrid), findsOneWidget);
+      final first = find.textContaining('热门第一条', findRichText: true);
+      final second = find.textContaining('热门第二条带图', findRichText: true);
+      expect(first, findsOneWidget);
+      expect(second, findsOneWidget);
+      // 第二张卡落在另一列：横坐标与第一张不同
+      expect(tester.getTopLeft(second).dx,
+          isNot(equals(tester.getTopLeft(first).dx)));
+    });
+  });
+
+  testWidgets('HotFeedView 窄屏：保持单列列表', (tester) async {
+    await mockNetworkImagesFor(() async {
+      // 默认测试视口 800x600 < 900，走单列 ListView
+      await tester.pumpWidget(
+          wrapWithProviders(const HotFeedView(channel: _hotChannel)));
+      await _settle(tester);
+      expect(find.byType(SliverMasonryGrid), findsNothing);
+      final first = find.textContaining('热门第一条', findRichText: true);
+      final second = find.textContaining('热门第二条带图', findRichText: true);
+      expect(first, findsOneWidget);
+      expect(second, findsOneWidget);
+      // 单列：两卡横坐标一致，第二张在第一张下方
+      expect(tester.getTopLeft(second).dx,
+          equals(tester.getTopLeft(first).dx));
+      expect(tester.getTopLeft(second).dy,
+          greaterThan(tester.getTopLeft(first).dy));
     });
   });
 
@@ -141,4 +247,31 @@ void main() {
       expect(find.text('刷新访客身份'), findsOneWidget);
     });
   });
+}
+
+/// 评论排序测试专用假服务：3 条评论，时间/点赞各不相同，
+/// 服务端返回顺序为 甲（最新）→ 乙（最早、高赞）→ 丙（中间）。
+class _SortableFakeService extends FakeWeiyueService {
+  @override
+  Future<({List<WbComment> comments, int total, int maxId})> getComments(
+      String id,
+      {required String authorUid,
+      int maxId = 0}) async {
+    WbComment c(String id, String text, String time, int likes) => WbComment(
+          id: id,
+          user: makeStatus().user,
+          text: text,
+          createdAtRaw: time,
+          likeCount: likes,
+        );
+    return (
+      comments: [
+        c('a', '评论甲最新', 'Mon Oct 26 15:00:00 +0800 2026', 5),
+        c('b', '评论乙最早高赞', 'Mon Oct 26 10:00:00 +0800 2026', 50),
+        c('c', '评论丙中间', 'Mon Oct 26 12:00:00 +0800 2026', 1),
+      ],
+      total: 3,
+      maxId: 0,
+    );
+  }
 }

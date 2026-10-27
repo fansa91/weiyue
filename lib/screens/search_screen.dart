@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/ime.dart';
 import '../models/models.dart';
 import '../services/weiyue_service.dart';
 import '../widgets/status_card.dart';
@@ -22,6 +23,7 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   late final _controller = TextEditingController(text: widget.initialKeyword);
+  final _searchFocus = FocusNode();
   SearchResult? _result;
   bool _loading = false;
   String? _error;
@@ -31,6 +33,11 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void initState() {
     super.initState();
+    // 桌面端 IME 缓解：搜索框获焦时把 IME 重新关联回窗口
+    //（进过播放页后 mpv 原生窗口可能把 IME 上下文分离，见 core/ime.dart）。
+    _searchFocus.addListener(() {
+      if (_searchFocus.hasFocus) ensureImeAttached();
+    });
     final kw = widget.initialKeyword?.trim() ?? '';
     if (kw.isNotEmpty) {
       _keyword = kw;
@@ -40,6 +47,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void dispose() {
+    _searchFocus.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -79,6 +87,7 @@ class _SearchScreenState extends State<SearchScreen> {
         titleSpacing: 0,
         title: TextField(
           controller: _controller,
+          focusNode: _searchFocus,
           autofocus: widget.autofocus,
           textInputAction: TextInputAction.search,
           decoration: const InputDecoration(

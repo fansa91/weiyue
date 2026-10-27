@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon/app_icon.png" width="128" alt="微阅 logo">
+</p>
+
 # 微阅（只读客户端）
 
 非官方第三方 Flutter 客户端，**访客态只读**：浏览热门/分类流、视频、热搜、搜索、用户主页与视频播放，不含发布/评论/点赞等写操作。

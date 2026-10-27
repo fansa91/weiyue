@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
@@ -118,6 +119,27 @@ class _HotFeedViewState extends State<HotFeedView> {
     }
   }
 
+  Widget _buildFooter() {
+    if (_items.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 80),
+        child: Center(child: Text(widget.emptyText)),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Center(
+        child: _ended
+            ? const Text('没有更多了')
+            : const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading && _items.isEmpty) {
@@ -142,34 +164,42 @@ class _HotFeedViewState extends State<HotFeedView> {
     }
     return RefreshIndicator(
       onRefresh: _loadFirst,
-      child: ListView.builder(
-        controller: _scroll,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        itemCount: _items.length + 1,
-        itemBuilder: (context, i) {
-          if (i == _items.length) {
-            if (_items.isEmpty) {
-              return Padding(
-                padding: const EdgeInsets.only(top: 80),
-                child: Center(child: Text(widget.emptyText)),
-              );
-            }
-            return Padding(
-              padding: const EdgeInsets.all(16),
-              child: Center(
-                child: _ended
-                    ? const Text('没有更多了')
-                    : const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-              ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          if (width >= 900) {
+            // 桌面宽屏：瀑布流多列（>=1400 三列，否则两列），
+            // footer 用 SliverToBoxAdapter 跨列置底。
+            return CustomScrollView(
+              controller: _scroll,
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+                  sliver: SliverMasonryGrid.count(
+                    crossAxisCount: width >= 1400 ? 3 : 2,
+                    mainAxisSpacing: 10,
+                    crossAxisSpacing: 10,
+                    childCount: _items.length,
+                    itemBuilder: (context, i) =>
+                        StatusCard(status: _items[i]),
+                  ),
+                ),
+                SliverToBoxAdapter(child: _buildFooter()),
+              ],
             );
           }
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: StatusCard(status: _items[i]),
+          return ListView.builder(
+            controller: _scroll,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            itemCount: _items.length + 1,
+            itemBuilder: (context, i) {
+              if (i == _items.length) return _buildFooter();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: StatusCard(status: _items[i]),
+              );
+            },
           );
         },
       ),
