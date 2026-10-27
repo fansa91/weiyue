@@ -26,10 +26,15 @@ void main() async {
   final settings = SettingsService();
   await settings.init();
   // 启动即预热两栈访客身份（失败不阻塞进主界面，进页面时还会重试）
-  visitor.ensure(WbStack.pc).catchError((_) => const VisitorIdentity('', '', 0));
+  visitor
+      .ensure(WbStack.pc)
+      .catchError((_) => const VisitorIdentity('', '', 0));
   visitor.ensure(WbStack.m).catchError((_) => const VisitorIdentity('', '', 0));
   // 表情映射异步装入（本地缓存优先，无缓存才拉 config；失败不阻塞）
   weibo.loadEmoticons();
+
+  // Windows IME 第二轮守卫：全局焦点监听 + 回前台补关联（见 core/ime.dart）
+  installImeGuards();
 
   runApp(
     MultiProvider(
@@ -45,8 +50,7 @@ void main() async {
   // Windows IME 缓解①：启动首帧后先把 IME 上下文关联回主窗口，
   // 避免原生插件初始化顺序导致一进应用就无法调起中文输入法。
   //（非 Windows 平台 ensureImeAttached 内部直接跳过。）
-  WidgetsBinding.instance
-      .addPostFrameCallback((_) => ensureImeAttached());
+  WidgetsBinding.instance.addPostFrameCallback((_) => ensureImeAttached());
 }
 
 class WeiyueApp extends StatelessWidget {
@@ -77,10 +81,12 @@ class WeiyueApp extends StatelessWidget {
             );
           case '/settings':
             return MaterialPageRoute(
-                builder: (_) => const DetailScaffold(child: SettingsScreen()));
+              builder: (_) => const DetailScaffold(child: SettingsScreen()),
+            );
           case '/theme':
             return MaterialPageRoute(
-                builder: (_) => const DetailScaffold(child: ThemeScreen()));
+              builder: (_) => const DetailScaffold(child: ThemeScreen()),
+            );
         }
         return null;
       },

@@ -1,0 +1,215 @@
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:photo_view/photo_view.dart';
+
+import '../core/long_image.dart';
+import '../models/models.dart';
+import 'photo_gallery.dart';
+
+/// 打开图片查看的统一入口：
+/// - 单图帖 → [LongImageReader]：尺寸已知按已知判定长图；未知先按
+///   普通缩放模式占位，打开后解析真实尺寸，是长图自动切滚动阅读。
+/// - 多图帖点中已知长图 → [LongImageReader]（内含上一张/下一张，
+///   可逐张翻看整组，其余图按各自尺寸决定模式）；
+/// - 多图帖点中普通/未知图 → 原图库 [PhotoGalleryScreen]（左右滑 + 缩放）。
+void openPicViewer(BuildContext context, List<WbPic> pics, int index) {
+  if (pics.isEmpty) return;
+  final i = index.clamp(0, pics.length - 1);
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => (pics.length == 1 || pics[i].isLongImage)
+          ? LongImageReader(pics: pics, initialIndex: i)
+          : PhotoGalleryScreen(pics: pics, initialIndex: i),
+    ),
+  );
+}
+
+/// 长图阅读器：一组图片里以长图为入口时的查看页。
+///
+/// 每张图独立判定模式：
+/// - 长图（接口尺寸已知，或打开后 ImageStream 解析出高宽比 ≥2.5）：
+///   默认「滚动阅读」——宽度撑满、按原比例纵向滚动看全图；
+///   AppBar 按钮或双击可切「缩放细看」（PhotoView）。
+/// - 普通图：缩放模式（与图库单页一致）。
+/// - 尺寸未知：先按缩放模式占位，解析出是长图后自动切滚动阅读
+///   （用户已手动切换过模式的图不自动改）。
+///
+/// 上一张/下一张按钮在 AppBar 右侧，长图模式内可逐张翻看整组图。
+class LongImageReader extends StatefulWidget {
+  final List<WbPic> pics;
+  final int initialIndex;
+
+  const LongImageReader({super.key, required this.pics, this.initialIndex = 0});
+
+  @override
+  State<LongImageReader> createState() => _LongImageReaderState();
+}
+
+class _LongImageReaderState extends State<LongImageReader> {
+  late int _index = widget.initialIndex.clamp(0, widget.pics.length - 1);
+
+  /// 每张图是否为长图：接口尺寸已知的 initState 即填；
+  /// 未知的打开后用 ImageStream 解析补填。
+  final Map<int, bool> _isLong = {};
+
+  /// 用户手动切过的模式（true=滚动阅读，false=缩放），优先于自动判定。
+  final Map<int, bool> _scrollOverride = {};
+
+  final _scrollController = ScrollController();
+
+  WbPic get _pic => widget.pics[_index];
+
+  @override
+  void initState() {
+    super.initState();
+    for (var i = 0; i < widget.pics.length; i++) {
+      final p = widget.pics[i];
+      if (p.hasSize) _isLong[i] = p.isLongImage;
+    }
+    _resolveSize(_index);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// 尺寸未知时解析真实尺寸判定长图；失败按普通图处理。
+  void _resolveSize(int i) {
+    if (_isLong.containsKey(i)) return;
+    final pic = widget.pics[i];
+    final stream = CachedNetworkImageProvider(
+      pic.bestOriginal,
+    ).resolve(const ImageConfiguration());
+    late ImageStreamListener listener;
+    listener = ImageStreamListener(
+      (info, _) {
+        stream.removeListener(listener);
+        if (!mounted) return;
+        setState(
+          () => _isLong[i] = isLongAspect(info.image.width, info.image.height),
+        );
+      },
+      onError: (_, _) {
+        stream.removeListener(listener);
+        if (mounted) setState(() => _isLong[i] = false);
+      },
+    );
+    stream.addListener(listener);
+  }
+
+  void _goTo(int i) {
+    if (i < 0 || i >= widget.pics.length) return;
+    setState(() => _index = i);
+    _resolveSize(i);
+    if (_scrollController.hasClients) _scrollController.jumpTo(0);
+  }
+
+  /// 当前图是否处于滚动阅读模式。
+  bool get _scrollMode {
+    final override = _scrollOverride[_index];
+    if (override != null) return override;
+    return _isLong[_index] ?? false;
+  }
+
+  void _toggleMode() {
+    if (_isLong[_index] != true) return; // 只有长图有双模式
+    setState(() => _scrollOverride[_index] = !_scrollMode);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pic = _pic;
+    final isLong = _isLong[_index] == true;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
+        title: Text(
+          isLong
+              ? '长图 ${_index + 1} / ${widget.pics.length}'
+              : '${_index + 1} / ${widget.pics.length}',
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left),
+            tooltip: '上一张',
+            onPressed: _index > 0 ? () => _goTo(_index - 1) : null,
+          ),
+          IconButton(
+            icon: const Icon(Icons.chevron_right),
+            tooltip: '下一张',
+            onPressed: _index < widget.pics.length - 1
+                ? () => _goTo(_index + 1)
+                : null,
+          ),
+          if (isLong)
+            IconButton(
+              key: const ValueKey('long-image-mode-toggle'),
+              icon: Icon(
+                _scrollMode
+                    ? Icons.zoom_in_outlined
+                    : Icons.unfold_more_outlined,
+              ),
+              tooltip: _scrollMode ? '缩放细看' : '滚动阅读',
+              onPressed: _toggleMode,
+            ),
+        ],
+      ),
+      body: _scrollMode ? _buildScrollBody(pic) : _buildZoomBody(pic),
+    );
+  }
+
+  /// 滚动阅读：宽度撑满可用宽度、按原图比例显示完整长图，纵向滚动。
+  Widget _buildScrollBody(WbPic pic) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return GestureDetector(
+          onDoubleTap: _toggleMode,
+          child: SingleChildScrollView(
+            key: const ValueKey('long-image-scroll'),
+            controller: _scrollController,
+            child: CachedNetworkImage(
+              imageUrl: pic.bestOriginal,
+              width: constraints.maxWidth,
+              fit: BoxFit.fitWidth,
+              placeholder: (_, _) => SizedBox(
+                height: 420,
+                width: constraints.maxWidth,
+                child: const Center(
+                  child: CircularProgressIndicator(color: Colors.white),
+                ),
+              ),
+              errorWidget: (_, _, _) => SizedBox(
+                height: 300,
+                width: constraints.maxWidth,
+                child: const Center(
+                  child: Icon(
+                    Icons.broken_image_outlined,
+                    color: Colors.white54,
+                    size: 40,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 缩放细看：与图库单页一致的 PhotoView。
+  Widget _buildZoomBody(WbPic pic) {
+    return PhotoView(
+      key: const ValueKey('long-image-zoom'),
+      imageProvider: CachedNetworkImageProvider(pic.bestOriginal),
+      minScale: PhotoViewComputedScale.contained,
+      maxScale: PhotoViewComputedScale.covered * 3,
+      backgroundDecoration: const BoxDecoration(color: Colors.black),
+      loadingBuilder: (_, _) =>
+          const Center(child: CircularProgressIndicator(color: Colors.white)),
+    );
+  }
+}

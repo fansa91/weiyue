@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/ime.dart';
 import '../models/models.dart';
 import '../services/weiyue_service.dart';
+import '../widgets/responsive_status_list.dart';
 import '../widgets/status_card.dart';
 import '../widgets/user_tile.dart';
 
@@ -43,10 +45,10 @@ class _SearchScreenState extends State<SearchScreen> {
   void initState() {
     super.initState();
     _loadHistory();
-    // 桌面端 IME 缓解：搜索框获焦时把 IME 重新关联回窗口
-    //（播放器原生窗口可能把 IME 上下文分离，见 core/ime.dart）。
+    // 桌面端 IME 缓解：搜索框获焦时走第二轮组合处理
+    //（落定版重新关联 + 焦点重启，见 core/ime.dart）。
     _searchFocus.addListener(() {
-      if (_searchFocus.hasFocus) ensureImeAttached();
+      if (_searchFocus.hasFocus) handleImeFocusGain(_searchFocus);
     });
     final kw = widget.initialKeyword?.trim() ?? '';
     if (kw.isNotEmpty) {
@@ -71,8 +73,10 @@ class _SearchScreenState extends State<SearchScreen> {
       if (_suggest != null) setState(() => _suggest = null);
       return;
     }
-    _suggestDebounce =
-        Timer(const Duration(milliseconds: 300), () => _fetchSuggest(q));
+    _suggestDebounce = Timer(
+      const Duration(milliseconds: 300),
+      () => _fetchSuggest(q),
+    );
   }
 
   Future<void> _fetchSuggest(String q) async {
@@ -188,34 +192,29 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
         ],
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
-          child: Column(
-            children: [
-              if (_result != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: SegmentedButton<int>(
-                    segments: const [
-                      ButtonSegment(value: 0, label: Text('综合')),
-                      ButtonSegment(value: 1, label: Text('用户')),
-                      ButtonSegment(value: 2, label: Text('动态')),
-                    ],
-                    selected: {_segment},
-                    onSelectionChanged: (s) =>
-                        setState(() => _segment = s.first),
-                    style: ButtonStyle(
-                      visualDensity: VisualDensity.compact,
-                      textStyle: WidgetStatePropertyAll(
-                          TextStyle(color: cs.onSurface, fontSize: 13)),
-                    ),
+      body: Column(
+        children: [
+          if (_result != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(value: 0, label: Text('综合')),
+                  ButtonSegment(value: 1, label: Text('用户')),
+                  ButtonSegment(value: 2, label: Text('动态')),
+                ],
+                selected: {_segment},
+                onSelectionChanged: (s) => setState(() => _segment = s.first),
+                style: ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  textStyle: WidgetStatePropertyAll(
+                    TextStyle(color: cs.onSurface, fontSize: 13),
                   ),
                 ),
-              Expanded(child: _buildBody()),
-            ],
-          ),
-        ),
+              ),
+            ),
+          Expanded(child: _buildBody()),
+        ],
       ),
     );
   }
@@ -230,8 +229,9 @@ class _SearchScreenState extends State<SearchScreen> {
             Text(_error!, textAlign: TextAlign.center),
             const SizedBox(height: 8),
             FilledButton(
-                onPressed: () => _doSearch(_keyword),
-                child: const Text('重试')),
+              onPressed: () => _doSearch(_keyword),
+              child: const Text('重试'),
+            ),
           ],
         ),
       );
@@ -249,24 +249,48 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     final showUsers = _segment != 2;
     final showStatuses = _segment != 1;
-    final children = <Widget>[];
-    if (showUsers) {
-      for (final u in result.users) {
-        children.add(UserTile(user: u));
-      }
-    }
-    if (showStatuses) {
-      for (final s in result.statuses) {
-        children.add(Padding(
-          padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
-          child: StatusCard(status: s),
-        ));
-      }
-    }
-    if (children.isEmpty) {
+    final users = showUsers ? result.users : const <WbUser>[];
+    final statuses = showStatuses ? result.statuses : const <WbStatus>[];
+    if (users.isEmpty && statuses.isEmpty) {
       return const Center(child: Text('没有找到相关结果'));
     }
-    return ListView(children: children);
+    // 窄屏：用户行 + 帖子卡单列；宽屏：用户行整行置顶，
+    // 帖子卡走瀑布流多列（列数与其它列表共用 feedColumnCount）。
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cols = feedColumnCount(constraints.maxWidth);
+        if (cols <= 1) {
+          return ListView(
+            children: [
+              for (final u in users) UserTile(user: u),
+              for (final s in statuses)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+                  child: StatusCard(status: s),
+                ),
+            ],
+          );
+        }
+        return CustomScrollView(
+          slivers: [
+            SliverList.builder(
+              itemCount: users.length,
+              itemBuilder: (context, i) => UserTile(user: users[i]),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              sliver: SliverMasonryGrid.count(
+                crossAxisCount: cols,
+                mainAxisSpacing: 10,
+                crossAxisSpacing: 10,
+                childCount: statuses.length,
+                itemBuilder: (context, i) => StatusCard(status: statuses[i]),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   /// 输入中的建议列表：联想词行（点→直接搜该词）+ 推荐用户行（点→主页）。
@@ -288,11 +312,14 @@ class _SearchScreenState extends State<SearchScreen> {
           const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Text('推荐用户',
-                style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurfaceVariant)),
+            child: Text(
+              '推荐用户',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
           ),
           for (final u in suggest.users) UserTile(user: u),
         ],
@@ -314,13 +341,12 @@ class _SearchScreenState extends State<SearchScreen> {
           children: [
             Icon(Icons.history, size: 18, color: cs.onSurfaceVariant),
             const SizedBox(width: 6),
-            const Text('搜索历史',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-            const Spacer(),
-            TextButton(
-              onPressed: _clearHistory,
-              child: const Text('清空'),
+            const Text(
+              '搜索历史',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
             ),
+            const Spacer(),
+            TextButton(onPressed: _clearHistory, child: const Text('清空')),
           ],
         ),
         const SizedBox(height: 6),

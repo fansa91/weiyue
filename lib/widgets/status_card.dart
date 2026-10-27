@@ -8,7 +8,7 @@ import '../core/nav.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
 import 'cover_image.dart';
-import 'photo_gallery.dart';
+import 'long_image_viewer.dart';
 
 /// 正文富文本分段：高亮 #话题#、@用户、链接，并把 [表情] 短码换成行内
 /// 表情图（WidgetSpan）。话题点击默认打开话题页（见 WbRichText）；
@@ -23,40 +23,45 @@ List<InlineSpan> buildWbTextSpans(
 }) {
   final cs = Theme.of(context).colorScheme;
   final linkStyle = TextStyle(color: cs.primary);
-  final pattern =
-      RegExp(r'#[^#\s][^#]*#|@[^\s:：,，]+|https?://[^\s]+|\[[^\[\]\s]{1,16}\]');
+  final pattern = RegExp(
+    r'#[^#\s][^#]*#|@[^\s:：,，]+|https?://[^\s]+|\[[^\[\]\s]{1,16}\]',
+  );
   final spans = <InlineSpan>[];
   var last = 0;
   for (final m in pattern.allMatches(text)) {
-    if (m.start > last) spans.add(TextSpan(text: text.substring(last, m.start)));
+    if (m.start > last) {
+      spans.add(TextSpan(text: text.substring(last, m.start)));
+    }
     final token = m.group(0)!;
     if (token.startsWith('[')) {
       final url = Emoticons.urlOf(token);
       if (url != null && url.isNotEmpty) {
-        spans.add(WidgetSpan(
-          alignment: PlaceholderAlignment.middle,
-          child: CachedNetworkImage(
-            imageUrl: url,
-            width: emoticonSize,
-            height: emoticonSize,
-            errorWidget: (_, _, _) => Text(token),
+        spans.add(
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: CachedNetworkImage(
+              imageUrl: url,
+              width: emoticonSize,
+              height: emoticonSize,
+              errorWidget: (_, _, _) => Text(token),
+            ),
           ),
-        ));
+        );
       } else {
         spans.add(TextSpan(text: token));
       }
     } else {
-      spans.add(TextSpan(
-        text: token,
-        style: linkStyle,
-        recognizer: token.startsWith('#')
-            ? (TapGestureRecognizer()
-              ..onTap = () => onTopicTap?.call(token))
-            : token.startsWith('@')
-                ? null
-                : (TapGestureRecognizer()
-                  ..onTap = () => onLinkTap?.call(token)),
-      ));
+      spans.add(
+        TextSpan(
+          text: token,
+          style: linkStyle,
+          recognizer: token.startsWith('#')
+              ? (TapGestureRecognizer()..onTap = () => onTopicTap?.call(token))
+              : token.startsWith('@')
+              ? null
+              : (TapGestureRecognizer()..onTap = () => onLinkTap?.call(token)),
+        ),
+      );
     }
     last = m.end;
   }
@@ -175,22 +180,28 @@ class StatusCard extends StatelessWidget {
                         ),
                         if (user?.verified ?? false) ...[
                           const SizedBox(width: 4),
-                          Icon(Icons.verified,
-                              size: 15,
-                              color: user!.verifiedType == 3
-                                  ? const Color(0xFFF5A623)
-                                  : cs.primary),
+                          Icon(
+                            Icons.verified,
+                            size: 15,
+                            color: user!.verifiedType == 3
+                                ? const Color(0xFFF5A623)
+                                : cs.primary,
+                          ),
                         ],
                       ],
                     ),
                     Text(
                       [
-                        formatTimeAgo(status.createdAt,
-                            fallback: status.createdAtRaw),
+                        formatTimeAgo(
+                          status.createdAt,
+                          fallback: status.createdAtRaw,
+                        ),
                         if (status.source.isNotEmpty) '来自 ${status.source}',
                       ].join(' · '),
-                      style:
-                          TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: cs.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -203,8 +214,10 @@ class StatusCard extends StatelessWidget {
           if (status.isLongText && !expanded)
             Padding(
               padding: const EdgeInsets.only(top: 2),
-              child: Text('全文',
-                  style: TextStyle(color: cs.primary, fontSize: 14)),
+              child: Text(
+                '全文',
+                style: TextStyle(color: cs.primary, fontSize: 14),
+              ),
             ),
           // 转发内嵌卡
           if (status.retweeted != null) ...[
@@ -225,19 +238,21 @@ class StatusCard extends StatelessWidget {
           // 底栏计数
           Row(
             children: [
+              _CountItem(icon: Icons.repeat, count: status.repostsCount),
               _CountItem(
-                  icon: Icons.repeat, count: status.repostsCount),
+                icon: Icons.mode_comment_outlined,
+                count: status.commentsCount,
+              ),
               _CountItem(
-                  icon: Icons.mode_comment_outlined,
-                  count: status.commentsCount),
-              _CountItem(
-                  icon: Icons.favorite_border,
-                  count: status.attitudesCount),
+                icon: Icons.favorite_border,
+                count: status.attitudesCount,
+              ),
               const Spacer(),
               if (status.readsCount > 0)
-                Text('${formatPlayCount(status.readsCount)} 阅读',
-                    style:
-                        TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+                Text(
+                  '${formatPlayCount(status.readsCount)} 阅读',
+                  style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                ),
               // 分享：复制帖子链接（独立 IconButton，自行处理点击，
               // 不触发整卡进详情的 InkWell 手势）
               IconButton(
@@ -245,17 +260,16 @@ class StatusCard extends StatelessWidget {
                 color: cs.onSurfaceVariant,
                 visualDensity: VisualDensity.compact,
                 padding: const EdgeInsets.only(left: 6),
-                constraints:
-                    const BoxConstraints(minWidth: 30, minHeight: 30),
+                constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
                 tooltip: '复制链接',
                 onPressed: () async {
                   await Clipboard.setData(
-                      ClipboardData(text: wbStatusUrl(status)));
+                    ClipboardData(text: wbStatusUrl(status)),
+                  );
                   if (context.mounted) {
                     ScaffoldMessenger.of(context)
                       ..hideCurrentSnackBar()
-                      ..showSnackBar(
-                          const SnackBar(content: Text('链接已复制')));
+                      ..showSnackBar(const SnackBar(content: Text('链接已复制')));
                   }
                 },
               ),
@@ -346,17 +360,45 @@ class _PicGrid extends StatelessWidget {
     if (pics.length == 1) {
       final pic = pics.first;
       return GestureDetector(
-        onTap: () => _openGallery(context, 0),
+        onTap: () => openPicViewer(context, pics, 0),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(10),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 320, maxWidth: 420),
-            child: CachedNetworkImage(
-              imageUrl: pic.bestMiddle,
-              fit: BoxFit.cover,
-              errorWidget: (_, _, _) => _errBox(context, height: 180),
-              placeholder: (_, _) => _errBox(context, height: 180),
-            ),
+          child: Stack(
+            children: [
+              ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxHeight: 320,
+                  maxWidth: 420,
+                ),
+                child: CachedNetworkImage(
+                  imageUrl: pic.bestMiddle,
+                  fit: BoxFit.cover,
+                  errorWidget: (_, _, _) => _errBox(context, height: 180),
+                  placeholder: (_, _) => _errBox(context, height: 180),
+                ),
+              ),
+              // 已知尺寸的长图：封顶高度裁剪展示 + 「长图」角标，
+              // 点开进长图阅读器（宽撑满纵向滚动）。
+              if (pic.isLongImage)
+                Positioned(
+                  left: 8,
+                  bottom: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.62),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      '长图',
+                      style: TextStyle(color: Colors.white, fontSize: 11.5),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       );
@@ -373,7 +415,7 @@ class _PicGrid extends StatelessWidget {
       itemCount: pics.length > 9 ? 9 : pics.length,
       itemBuilder: (context, i) {
         return GestureDetector(
-          onTap: () => _openGallery(context, i),
+          onTap: () => openPicViewer(context, pics, i),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: CachedNetworkImage(
@@ -394,12 +436,6 @@ class _PicGrid extends StatelessWidget {
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: const Center(child: Icon(Icons.broken_image_outlined)),
     );
-  }
-
-  void _openGallery(BuildContext context, int index) {
-    Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => PhotoGalleryScreen(pics: pics, initialIndex: index),
-    ));
   }
 }
 
@@ -424,15 +460,17 @@ class _VideoCover extends StatelessWidget {
                 CachedNetworkImage(
                   imageUrl: video.cover,
                   fit: BoxFit.cover,
-                  errorWidget: (_, _, _) =>
-                      Container(color: Colors.black87),
+                  errorWidget: (_, _, _) => Container(color: Colors.black87),
                 )
               else
                 Container(color: Colors.black87),
               Container(color: Colors.black.withValues(alpha: 0.18)),
               const Center(
-                child: Icon(Icons.play_circle_fill,
-                    size: 56, color: Colors.white),
+                child: Icon(
+                  Icons.play_circle_fill,
+                  size: 56,
+                  color: Colors.white,
+                ),
               ),
               Positioned(
                 left: 8,
@@ -449,8 +487,10 @@ class _VideoCover extends StatelessWidget {
                   right: 8,
                   bottom: 6,
                   child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.55),
                       borderRadius: BorderRadius.circular(4),

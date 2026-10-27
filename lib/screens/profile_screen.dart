@@ -6,8 +6,8 @@ import '../core/utils.dart';
 import '../models/models.dart';
 import '../services/weiyue_service.dart';
 import '../widgets/detail_scaffold.dart';
-import '../widgets/photo_gallery.dart';
-import '../widgets/status_card.dart';
+import '../widgets/long_image_viewer.dart';
+import '../widgets/responsive_status_list.dart';
 import 'playlist_screen.dart';
 
 /// 用户主页：PC profile/info 头 + 五页签
@@ -68,8 +68,10 @@ class _ProfileScreenState extends State<ProfileScreen>
       builder: (_) => ListView(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
         children: [
-          Text(user?.screenName ?? '资料',
-              style: Theme.of(context).textTheme.titleLarge),
+          Text(
+            user?.screenName ?? '资料',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
           const SizedBox(height: 12),
           if (user != null && user.description.isNotEmpty)
             _row('简介', user.description),
@@ -82,11 +84,15 @@ class _ProfileScreenState extends State<ProfileScreen>
           if ((detail['created_at'] ?? '') != '')
             _row('注册时间', '${detail['created_at']}'),
           if (detail['sunshine_credit'] is Map)
-            _row('阳光信用',
-                '${(detail['sunshine_credit'] as Map)['level'] ?? ''}'),
+            _row(
+              '阳光信用',
+              '${(detail['sunshine_credit'] as Map)['level'] ?? ''}',
+            ),
           if ((detail['companyVerified'] is Map))
-            _row('企业认证',
-                '${(detail['companyVerified'] as Map)['realName'] ?? ''}'),
+            _row(
+              '企业认证',
+              '${(detail['companyVerified'] as Map)['realName'] ?? ''}',
+            ),
           if (detail['label_desc'] is List)
             for (final l in detail['label_desc'] as List)
               if (l is Map && (l['name'] ?? '') != '')
@@ -105,9 +111,12 @@ class _ProfileScreenState extends State<ProfileScreen>
         children: [
           SizedBox(
             width: 76,
-            child: Text(k,
-                style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            child: Text(
+              k,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
           ),
           Expanded(child: Text(v)),
         ],
@@ -212,11 +221,13 @@ class _ProfileScreenState extends State<ProfileScreen>
                     avatar: const Icon(Icons.playlist_play, size: 17),
                     label: Text('${p.name} · ${p.itemCount}'),
                     onPressed: () {
-                      Navigator.of(context).push(MaterialPageRoute(
-                        builder: (_) => DetailScaffold(
-                          child: PlaylistScreen(playlist: p),
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => DetailScaffold(
+                            child: PlaylistScreen(playlist: p),
+                          ),
                         ),
-                      ));
+                      );
                     },
                   ),
                 );
@@ -243,7 +254,9 @@ class _ProfileScreenState extends State<ProfileScreen>
           width: double.infinity,
           child: user.coverImagePhone.isNotEmpty
               ? CachedNetworkImage(
-                  imageUrl: user.coverImagePhone, fit: BoxFit.cover)
+                  imageUrl: user.coverImagePhone,
+                  fit: BoxFit.cover,
+                )
               : Container(color: cs.primaryContainer),
         ),
         Padding(
@@ -253,8 +266,9 @@ class _ProfileScreenState extends State<ProfileScreen>
             children: [
               CircleAvatar(
                 radius: 30,
-                backgroundImage:
-                    user.avatar.isNotEmpty ? NetworkImage(user.avatar) : null,
+                backgroundImage: user.avatar.isNotEmpty
+                    ? NetworkImage(user.avatar)
+                    : null,
                 child: user.avatar.isEmpty
                     ? const Icon(Icons.person, size: 30)
                     : null,
@@ -267,19 +281,25 @@ class _ProfileScreenState extends State<ProfileScreen>
                     Row(
                       children: [
                         Flexible(
-                          child: Text(user.screenName,
-                              style: const TextStyle(
-                                  fontSize: 18, fontWeight: FontWeight.w700),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            user.screenName,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         if (user.verified) ...[
                           const SizedBox(width: 4),
-                          Icon(Icons.verified,
-                              size: 17,
-                              color: user.verifiedType == 3
-                                  ? const Color(0xFFF5A623)
-                                  : cs.primary),
+                          Icon(
+                            Icons.verified,
+                            size: 17,
+                            color: user.verifiedType == 3
+                                ? const Color(0xFFF5A623)
+                                : cs.primary,
+                          ),
                         ],
                         const Spacer(),
                         TextButton(
@@ -289,10 +309,15 @@ class _ProfileScreenState extends State<ProfileScreen>
                       ],
                     ),
                     if (user.description.isNotEmpty)
-                      Text(user.description,
-                          maxLines: 2, overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                              fontSize: 13, color: cs.onSurfaceVariant)),
+                      Text(
+                        user.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
@@ -317,13 +342,18 @@ class _ProfileScreenState extends State<ProfileScreen>
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(formatPlayCount(value),
-              style: const TextStyle(fontWeight: FontWeight.w700)),
+          Text(
+            formatPlayCount(value),
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
           const SizedBox(width: 4),
-          Text(label,
-              style: TextStyle(
-                  fontSize: 12.5,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12.5,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
         ],
       ),
     );
@@ -342,8 +372,10 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   Widget build(
-          BuildContext context, double shrinkOffset, bool overlapsContent) =>
-      Container(color: bg, child: tabBar);
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) => Container(color: bg, child: tabBar);
 
   @override
   bool shouldRebuild(_TabBarDelegate old) => old.tabBar != tabBar;
@@ -371,8 +403,7 @@ class _PagedStatusesState extends State<_PagedStatuses> {
   void initState() {
     super.initState();
     _scroll.addListener(() {
-      if (_scroll.position.pixels >=
-          _scroll.position.maxScrollExtent - 500) {
+      if (_scroll.position.pixels >= _scroll.position.maxScrollExtent - 500) {
         _loadMore();
       }
     });
@@ -422,28 +453,24 @@ class _PagedStatusesState extends State<_PagedStatuses> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-    return ListView.builder(
+    // 宽屏瀑布流/窄屏单列与其它列表共用 ResponsiveStatusList；
+    // 本列表挂在 NestedScrollView 的 TabBarView 里，作内层滚动视图。
+    return ResponsiveStatusList(
+      items: _items,
       controller: _scroll,
-      itemCount: _items.length + 2,
-      itemBuilder: (context, i) {
-        if (i == 0) return widget.header ?? const SizedBox.shrink();
-        if (i == _items.length + 1) {
-          return Padding(
-            padding: const EdgeInsets.all(16),
-            child: Center(
-              child: Text(_items.isEmpty
-                  ? '暂无内容'
-                  : _ended
-                      ? '没有更多了'
-                      : ''),
-            ),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-          child: StatusCard(status: _items[i - 1]),
-        );
-      },
+      header: widget.header,
+      footer: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Center(
+          child: Text(
+            _items.isEmpty
+                ? '暂无内容'
+                : _ended
+                ? '没有更多了'
+                : '',
+          ),
+        ),
+      ),
     );
   }
 }
@@ -480,7 +507,10 @@ class _AlbumTabState extends State<_AlbumTab> {
       // 兜底：旧逻辑逐条补图，图集即每条帖子的 pics
       try {
         final list = await svc.getAlbumStatuses(widget.uid);
-        groups = [for (final s in list) if (s.pics.isNotEmpty) s.pics];
+        groups = [
+          for (final s in list)
+            if (s.pics.isNotEmpty) s.pics,
+        ];
       } catch (_) {}
     }
     if (mounted) {
@@ -513,9 +543,7 @@ class _AlbumTabState extends State<_AlbumTab> {
       itemBuilder: (context, i) {
         final (pics, idx) = flat[i];
         return GestureDetector(
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => PhotoGalleryScreen(pics: pics, initialIndex: idx),
-          )),
+          onTap: () => openPicViewer(context, pics, idx),
           child: CachedNetworkImage(
             imageUrl: pics[idx].bestMiddle,
             fit: BoxFit.cover,

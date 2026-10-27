@@ -32,26 +32,26 @@ abstract class InlinePlayback {
 
 /// 播放后端工厂：全屏进/出回调由 [InlineVideoPlayer] 提供
 /// （按视频比例定向逻辑在播放器组件内，后端只负责透传给 Video）。
-typedef InlinePlaybackFactory = InlinePlayback Function({
-  required Future<void> Function() onEnterFullscreen,
-  required Future<void> Function() onExitFullscreen,
-});
+typedef InlinePlaybackFactory =
+    InlinePlayback Function({
+      required Future<void> Function() onEnterFullscreen,
+      required Future<void> Function() onExitFullscreen,
+    });
 
 InlinePlayback _mediaKitPlaybackFactory({
   required Future<void> Function() onEnterFullscreen,
   required Future<void> Function() onExitFullscreen,
-}) =>
-    _MediaKitPlayback(
-      onEnterFullscreen: onEnterFullscreen,
-      onExitFullscreen: onExitFullscreen,
-    );
+}) => _MediaKitPlayback(
+  onEnterFullscreen: onEnterFullscreen,
+  onExitFullscreen: onExitFullscreen,
+);
 
 class _MediaKitPlayback implements InlinePlayback {
   _MediaKitPlayback({
     required Future<void> Function() onEnterFullscreen,
     required Future<void> Function() onExitFullscreen,
-  })  : _onEnterFullscreen = onEnterFullscreen,
-        _onExitFullscreen = onExitFullscreen;
+  }) : _onEnterFullscreen = onEnterFullscreen,
+       _onExitFullscreen = onExitFullscreen;
 
   final Future<void> Function() _onEnterFullscreen;
   final Future<void> Function() _onExitFullscreen;
@@ -133,8 +133,7 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
 
   bool get _isMobile => Platform.isAndroid || Platform.isIOS;
 
-  bool get _isLandscapeVideo =>
-      isLandscapeVideoSize(_videoWidth, _videoHeight);
+  bool get _isLandscapeVideo => isLandscapeVideoSize(_videoWidth, _videoHeight);
 
   @override
   void initState() {
@@ -175,8 +174,9 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
     if (_isMobile) {
       SystemChrome.setPreferredOrientations(const []);
     }
-    // Windows IME 缓解：播放器原生窗口销毁后兜底把 IME 关联回主窗口。
-    unawaited(ensureImeAttached());
+    // Windows IME 缓解：播放器原生窗口销毁后落定版重新关联
+    //（含 350ms 延迟补刀，覆盖 mpv 窗口拆晚于 dispose 的竞态）。
+    unawaited(ensureImeAttachedSettled());
     super.dispose();
   }
 
@@ -310,7 +310,8 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
   Widget build(BuildContext context) {
     final video = widget.status.video;
     if (video == null) return const SizedBox.shrink();
-    final ratio = (_videoWidth != null &&
+    final ratio =
+        (_videoWidth != null &&
             _videoHeight != null &&
             _videoWidth! > 0 &&
             _videoHeight! > 0)
@@ -350,8 +351,11 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
               if (playbackList.length > 1)
                 _circleButton(
                   child: PopupMenuButton<WbPlayback>(
-                    icon: const Icon(Icons.high_quality_outlined,
-                        color: Colors.white, size: 20),
+                    icon: const Icon(
+                      Icons.high_quality_outlined,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                     tooltip: '画质',
                     onSelected: (q) => _start(quality: q),
                     itemBuilder: (_) => [
@@ -365,7 +369,9 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
                                 Text(
                                   '  ${(p.bitrate / 1000000).toStringAsFixed(1)}Mbps',
                                   style: const TextStyle(
-                                      fontSize: 12, color: Colors.grey),
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
                                 ),
                               if (_current?.url == p.url) ...[
                                 const Spacer(),
@@ -381,8 +387,11 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
               // 显式全屏按钮（不依赖默认控件是否显示），走按比例定向逻辑
               _circleButton(
                 child: IconButton(
-                  icon: const Icon(Icons.fullscreen,
-                      color: Colors.white, size: 22),
+                  icon: const Icon(
+                    Icons.fullscreen,
+                    color: Colors.white,
+                    size: 22,
+                  ),
                   tooltip: '全屏',
                   onPressed: () => _playback?.toggleFullscreen(),
                 ),
@@ -396,8 +405,10 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
 
   Widget _circleButton({required Widget child}) {
     return Container(
-      decoration:
-          const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+      decoration: const BoxDecoration(
+        color: Colors.black45,
+        shape: BoxShape.circle,
+      ),
       child: child,
     );
   }
@@ -422,8 +433,11 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: const Icon(Icons.play_circle_fill,
-                    size: 64, color: Colors.white),
+                icon: const Icon(
+                  Icons.play_circle_fill,
+                  size: 64,
+                  color: Colors.white,
+                ),
                 tooltip: '播放',
                 onPressed: () => _start(),
               ),

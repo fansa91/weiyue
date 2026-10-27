@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/models.dart';
 import '../services/weiyue_service.dart';
-import '../widgets/status_card.dart';
+import '../widgets/responsive_status_list.dart';
 
 /// 视频合集详情：标题/封面/集数列表（videoalbumdetail，next_cursor 游标翻页）。
 /// 点单集卡片进该帖详情，详情页内嵌播放器直接预览播放。
@@ -44,9 +44,10 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
 
   Future<void> _loadFirst() async {
     try {
-      final r = await context
-          .read<WeiyueService>()
-          .getVideoAlbum(widget.playlist.id, cursor: 0);
+      final r = await context.read<WeiyueService>().getVideoAlbum(
+        widget.playlist.id,
+        cursor: 0,
+      );
       if (!mounted) return;
       setState(() {
         _items
@@ -70,9 +71,10 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     if (_loading || _loadingMore || _ended) return;
     setState(() => _loadingMore = true);
     try {
-      final r = await context
-          .read<WeiyueService>()
-          .getVideoAlbum(widget.playlist.id, cursor: _cursor);
+      final r = await context.read<WeiyueService>().getVideoAlbum(
+        widget.playlist.id,
+        cursor: _cursor,
+      );
       if (!mounted) return;
       setState(() {
         _items.addAll(r.statuses);
@@ -120,21 +122,13 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     if (_items.isEmpty) {
       return const Center(child: Text('暂无内容'));
     }
-    return ListView.builder(
+    return ResponsiveStatusList(
+      items: _items,
       controller: _scroll,
-      itemCount: _items.length + 1,
-      itemBuilder: (context, i) {
-        if (i == _items.length) {
-          return Padding(
-            padding: const EdgeInsets.all(16),
-            child: Center(child: Text(_ended ? '没有更多了' : '')),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-          child: StatusCard(status: _items[i]),
-        );
-      },
+      footer: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Center(child: Text(_ended ? '没有更多了' : '')),
+      ),
     );
   }
 }

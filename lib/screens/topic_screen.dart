@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/models.dart';
 import '../services/weiyue_service.dart';
-import '../widgets/status_card.dart';
+import '../widgets/responsive_status_list.dart';
 
 /// 话题页：#话题# + 该话题的帖子流（m 话题容器 231522，cardlistInfo.page 翻页，
 /// 与用户时间线同一套容器翻页规则）。正文里的话题点击、搜索都可进这里。
@@ -44,9 +44,10 @@ class _TopicScreenState extends State<TopicScreen> {
 
   Future<void> _loadFirst() async {
     try {
-      final page = await context
-          .read<WeiyueService>()
-          .getTopicStatuses(widget.topic, page: 1);
+      final page = await context.read<WeiyueService>().getTopicStatuses(
+        widget.topic,
+        page: 1,
+      );
       if (!mounted) return;
       setState(() {
         _items
@@ -70,9 +71,10 @@ class _TopicScreenState extends State<TopicScreen> {
     if (_loading || _loadingMore || _ended) return;
     setState(() => _loadingMore = true);
     try {
-      final page = await context
-          .read<WeiyueService>()
-          .getTopicStatuses(widget.topic, page: _page + 1);
+      final page = await context.read<WeiyueService>().getTopicStatuses(
+        widget.topic,
+        page: _page + 1,
+      );
       if (!mounted) return;
       setState(() {
         _page += 1;
@@ -119,21 +121,13 @@ class _TopicScreenState extends State<TopicScreen> {
     if (_items.isEmpty) {
       return const Center(child: Text('暂无内容'));
     }
-    return ListView.builder(
+    return ResponsiveStatusList(
+      items: _items,
       controller: _scroll,
-      itemCount: _items.length + 1,
-      itemBuilder: (context, i) {
-        if (i == _items.length) {
-          return Padding(
-            padding: const EdgeInsets.all(16),
-            child: Center(child: Text(_ended ? '没有更多了' : '')),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-          child: StatusCard(status: _items[i]),
-        );
-      },
+      footer: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Center(child: Text(_ended ? '没有更多了' : '')),
+      ),
     );
   }
 }

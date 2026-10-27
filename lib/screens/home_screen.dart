@@ -40,63 +40,58 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('微阅 · 热门'),
-        centerTitle: false,
-      ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
-          child: Column(
-            children: [
-              // 分类 chips
-              SizedBox(
-                height: 46,
-                child: _loadingChannels
-                    ? const Center(
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+      appBar: AppBar(title: const Text('微阅 · 热门'), centerTitle: false),
+      body: Column(
+        children: [
+          // 分类 chips
+          SizedBox(
+            height: 46,
+            child: _loadingChannels
+                ? const Center(
+                    child: SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 7,
+                    ),
+                    itemCount: _channels.length,
+                    itemBuilder: (context, i) {
+                      final ch = _channels[i];
+                      final selected =
+                          _selected?.gid == ch.gid &&
+                          _selected?.containerid == ch.containerid;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          label: Text(ch.title),
+                          selected: selected,
+                          onSelected: (_) => setState(() => _selected = ch),
+                          selectedColor: cs.primaryContainer,
+                          showCheckmark: false,
                         ),
-                      )
-                    : ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 7),
-                        itemCount: _channels.length,
-                        itemBuilder: (context, i) {
-                          final ch = _channels[i];
-                          final selected = _selected?.gid == ch.gid &&
-                              _selected?.containerid == ch.containerid;
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                              label: Text(ch.title),
-                              selected: selected,
-                              onSelected: (_) =>
-                                  setState(() => _selected = ch),
-                              selectedColor: cs.primaryContainer,
-                              showCheckmark: false,
-                            ),
-                          );
-                        },
-                      ),
-              ),
-              const Divider(height: 1),
-              Expanded(
-                child: _selected == null
-                    ? const SizedBox.shrink()
-                    : HotFeedView(
-                        key: ValueKey(
-                            '${_selected!.gid}_${_selected!.containerid}'),
-                        channel: _selected!,
-                        homeTopSignalEnabled: true,
-                      ),
-              ),
-            ],
+                      );
+                    },
+                  ),
           ),
-        ),
+          const Divider(height: 1),
+          Expanded(
+            child: _selected == null
+                ? const SizedBox.shrink()
+                : HotFeedView(
+                    key: ValueKey(
+                      '${_selected!.gid}_${_selected!.containerid}',
+                    ),
+                    channel: _selected!,
+                    homeTopSignalEnabled: true,
+                  ),
+          ),
+        ],
       ),
     );
   }

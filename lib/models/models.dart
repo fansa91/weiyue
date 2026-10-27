@@ -1,5 +1,6 @@
 import 'package:intl/intl.dart';
 
+import '../core/long_image.dart';
 import '../core/utils.dart';
 
 /// 微博数据模型（只取客户端需要的子集）。
@@ -18,8 +19,8 @@ int _intOf(dynamic v) {
       final unit = m.group(2) == '亿'
           ? 100000000
           : m.group(2) == '万'
-              ? 10000
-              : 1;
+          ? 10000
+          : 1;
       return (base * unit).round();
     }
     return 0;
@@ -55,8 +56,7 @@ DateTime? parseWbTime(String raw) {
     return DateFormat('EEE MMM dd HH:mm:ss Z yyyy', 'en_US').parse(raw);
   } catch (_) {
     // intl 对 'Z' 时区段解析不稳定：去掉 ±XXXX 只取本地时间部分
-    final stripped =
-        raw.replaceAll(RegExp(r'\s[+-]\d{4}\s'), ' ').trim();
+    final stripped = raw.replaceAll(RegExp(r'\s[+-]\d{4}\s'), ' ').trim();
     try {
       return DateFormat('EEE MMM dd HH:mm:ss yyyy', 'en_US').parse(stripped);
     } catch (_) {
@@ -106,7 +106,8 @@ class WbUser {
       id: _intOf(j['id'] ?? j['uid']),
       screenName: _strOf(j['screen_name'] ?? j['name'] ?? j['nick']),
       avatar: httpsUrl(
-          avatarLarge.isNotEmpty ? avatarLarge : _strOf(j['profile_image_url'])),
+        avatarLarge.isNotEmpty ? avatarLarge : _strOf(j['profile_image_url']),
+      ),
       verified: _boolOf(j['verified']),
       verifiedType: _intOf(j['verified_type'] ?? -1),
       verifiedReason: _strOf(j['verified_reason']),
@@ -128,17 +129,33 @@ class WbPic {
   final String large;
   final String original;
 
+  /// 接口给出的图片尺寸（像素，取 large 档）；接口没给时为 0，
+  /// 长图判定改由查看器打开后用 ImageStream 解析真实尺寸。
+  final int width;
+  final int height;
+
   const WbPic({
     required this.pid,
     this.thumbnail = '',
     this.bmiddle = '',
     this.large = '',
     this.original = '',
+    this.width = 0,
+    this.height = 0,
   });
 
   String get bestLarge =>
       large.isNotEmpty ? large : (original.isNotEmpty ? original : bmiddle);
   String get bestMiddle => bmiddle.isNotEmpty ? bmiddle : bestLarge;
+
+  /// 查看长图/原图优先 original，其次 large。
+  String get bestOriginal => original.isNotEmpty ? original : bestLarge;
+
+  /// 尺寸已知且高宽比 ≥2.5 → 长图。
+  bool get isLongImage => isLongAspect(width, height);
+
+  /// 尺寸是否已知（两个都 >0）。
+  bool get hasSize => width > 0 && height > 0;
 }
 
 class WbPlayback {
@@ -274,7 +291,9 @@ class WbStatus {
   factory WbStatus.fromJson(Map<String, dynamic> j) {
     final rawText = _strOf(j['text_raw']);
     final htmlText = _strOf(j['text']);
-    final text = rawText.isNotEmpty ? cleanWbText(rawText) : stripHtml(htmlText);
+    final text = rawText.isNotEmpty
+        ? cleanWbText(rawText)
+        : stripHtml(htmlText);
 
     // 图片：PC 用 pic_ids + pic_infos{pid:{thumbnail/bmiddle/large/original:{url}}}
     // m 端用 pics[{pid,url,large:{url}}]
@@ -289,24 +308,44 @@ class WbStatus {
         final info = _mapOf(picInfos[pid]);
         if (info.isEmpty) continue;
         String u(String k) => httpsUrl(_strOf(_mapOf(info[k])['url']));
-        pics.add(WbPic(
-          pid: pid,
-          thumbnail: u('thumbnail'),
-          bmiddle: u('bmiddle'),
-          large: u('large'),
-          original: u('original'),
-        ));
+        // 尺寸：各档位对象除 url 外通常还带 width/height（数字或字符串），
+        // 优先 large，其次 original/bmiddle/thumbnail，取第一组有效值。
+        var w = 0, h = 0;
+        for (final k in ['large', 'original', 'bmiddle', 'thumbnail']) {
+          final sizeObj = _mapOf(info[k]);
+          w = _intOf(sizeObj['width']);
+          h = _intOf(sizeObj['height']);
+          if (w > 0 && h > 0) break;
+        }
+        pics.add(
+          WbPic(
+            pid: pid,
+            thumbnail: u('thumbnail'),
+            bmiddle: u('bmiddle'),
+            large: u('large'),
+            original: u('original'),
+            width: w,
+            height: h,
+          ),
+        );
       }
     } else {
       for (final p in _listOf(j['pics'])) {
         final pm = _mapOf(p);
         if (pm.isEmpty) continue;
-        pics.add(WbPic(
-          pid: _strOf(pm['pid']),
-          thumbnail: httpsUrl(_strOf(pm['url'])),
-          bmiddle: httpsUrl(_strOf(pm['url'])),
-          large: httpsUrl(_strOf(_mapOf(pm['large'])['url'])),
-        ));
+        // m 端尺寸：large:{url,width,height} 或 geo:{width,height}
+        final largeObj = _mapOf(pm['large']);
+        final geo = _mapOf(pm['geo']);
+        pics.add(
+          WbPic(
+            pid: _strOf(pm['pid']),
+            thumbnail: httpsUrl(_strOf(pm['url'])),
+            bmiddle: httpsUrl(_strOf(pm['url'])),
+            large: httpsUrl(_strOf(largeObj['url'])),
+            width: _intOf(largeObj['width'] ?? geo['width']),
+            height: _intOf(largeObj['height'] ?? geo['height']),
+          ),
+        );
       }
     }
 
@@ -316,7 +355,8 @@ class WbStatus {
     final pageInfo = _mapOf(j['page_info']);
     final piType = _strOf(pageInfo['type']);
     final piObjType = pageInfo['object_type'];
-    final isMediaPage = pageInfo.isNotEmpty &&
+    final isMediaPage =
+        pageInfo.isNotEmpty &&
         (piObjType == 'video' ||
             piObjType == 'live' ||
             piObjType == 11 ||
@@ -331,13 +371,15 @@ class WbStatus {
         final url = httpsUrl(_strOf(play['url']));
         if (url.isEmpty) continue;
         final meta = _mapOf(im['meta']);
-        playbacks.add(WbPlayback(
-          label: _strOf(play['label'] ?? meta['label']),
-          width: _intOf(play['width']),
-          height: _intOf(play['height']),
-          url: url,
-          bitrate: _intOf(play['bitrate']),
-        ));
+        playbacks.add(
+          WbPlayback(
+            label: _strOf(play['label'] ?? meta['label']),
+            width: _intOf(play['width']),
+            height: _intOf(play['height']),
+            url: url,
+            bitrate: _intOf(play['bitrate']),
+          ),
+        );
       }
       playbacks.sort((a, b) => b.height.compareTo(a.height));
       final dur = mi['duration'];
@@ -352,7 +394,8 @@ class WbStatus {
         onlineUsers: _strOf(mi['online_users']),
         playbackList: playbacks,
         fallbackUrl: httpsUrl(
-            _strOf(mi['stream_url_hd'] ?? mi['mp4_hd_url'] ?? mi['stream_url'])),
+          _strOf(mi['stream_url_hd'] ?? mi['mp4_hd_url'] ?? mi['stream_url']),
+        ),
       );
     }
 
@@ -432,8 +475,12 @@ class WbAttitude {
   final String createdAtRaw;
   final String source;
 
-  const WbAttitude(
-      {required this.id, this.user, this.createdAtRaw = '', this.source = ''});
+  const WbAttitude({
+    required this.id,
+    this.user,
+    this.createdAtRaw = '',
+    this.source = '',
+  });
 
   factory WbAttitude.fromJson(Map<String, dynamic> j) {
     final userMap = _mapOf(j['user']);
@@ -451,17 +498,23 @@ class WbChannel {
   final String title;
   final String containerid;
 
-  const WbChannel(
-      {required this.gid, required this.title, required this.containerid});
+  const WbChannel({
+    required this.gid,
+    required this.title,
+    required this.containerid,
+  });
 
   factory WbChannel.fromJson(Map<String, dynamic> j) => WbChannel(
-        gid: _strOf(j['gid']),
-        title: _strOf(j['title'] ?? j['name']),
-        containerid: _strOf(j['containerid'] ?? j['fid'] ?? j['gid']),
-      );
+    gid: _strOf(j['gid']),
+    title: _strOf(j['title'] ?? j['name']),
+    containerid: _strOf(j['containerid'] ?? j['fid'] ?? j['gid']),
+  );
 
-  Map<String, dynamic> toJson() =>
-      {'gid': gid, 'title': title, 'containerid': containerid};
+  Map<String, dynamic> toJson() => {
+    'gid': gid,
+    'title': title,
+    'containerid': containerid,
+  };
 }
 
 class HotWord {
@@ -471,20 +524,21 @@ class HotWord {
   final String label; // 爆/热/新 等
   final String flagDesc; // 综艺 等分类标
 
-  const HotWord(
-      {required this.word,
-      this.num = 0,
-      this.realpos = 0,
-      this.label = '',
-      this.flagDesc = ''});
+  const HotWord({
+    required this.word,
+    this.num = 0,
+    this.realpos = 0,
+    this.label = '',
+    this.flagDesc = '',
+  });
 
   factory HotWord.fromJson(Map<String, dynamic> j) => HotWord(
-        word: _strOf(j['word'] ?? j['note']),
-        num: _intOf(j['num']),
-        realpos: _intOf(j['realpos']),
-        label: _strOf(j['icon_desc'] ?? j['label_name']),
-        flagDesc: _strOf(j['flag_desc']),
-      );
+    word: _strOf(j['word'] ?? j['note']),
+    num: _intOf(j['num']),
+    realpos: _intOf(j['realpos']),
+    label: _strOf(j['icon_desc'] ?? j['label_name']),
+    flagDesc: _strOf(j['flag_desc']),
+  );
 }
 
 class BandItem {
@@ -494,20 +548,21 @@ class BandItem {
   final String category;
   final String label;
 
-  const BandItem(
-      {required this.word,
-      this.num = 0,
-      this.realpos = 0,
-      this.category = '',
-      this.label = ''});
+  const BandItem({
+    required this.word,
+    this.num = 0,
+    this.realpos = 0,
+    this.category = '',
+    this.label = '',
+  });
 
   factory BandItem.fromJson(Map<String, dynamic> j) => BandItem(
-        word: _strOf(j['word'] ?? j['note']),
-        num: _intOf(j['num'] ?? j['hot_num']),
-        realpos: _intOf(j['realpos']),
-        category: _strOf(j['category'] ?? j['m_category']),
-        label: _strOf(j['icon_desc']),
-      );
+    word: _strOf(j['word'] ?? j['note']),
+    num: _intOf(j['num'] ?? j['hot_num']),
+    realpos: _intOf(j['realpos']),
+    category: _strOf(j['category'] ?? j['m_category']),
+    label: _strOf(j['icon_desc']),
+  );
 }
 
 class WbPlaylist {
@@ -516,18 +571,19 @@ class WbPlaylist {
   final int itemCount;
   final bool isPay;
 
-  const WbPlaylist(
-      {required this.id,
-      required this.name,
-      this.itemCount = 0,
-      this.isPay = false});
+  const WbPlaylist({
+    required this.id,
+    required this.name,
+    this.itemCount = 0,
+    this.isPay = false,
+  });
 
   factory WbPlaylist.fromJson(Map<String, dynamic> j) => WbPlaylist(
-        id: _strOf(j['id_str'] ?? j['id']),
-        name: _strOf(j['name']),
-        itemCount: _intOf(j['item_count']),
-        isPay: _intOf(j['is_pay']) != 0,
-      );
+    id: _strOf(j['id_str'] ?? j['id']),
+    name: _strOf(j['name']),
+    itemCount: _intOf(j['item_count']),
+    isPay: _intOf(j['is_pay']) != 0,
+  );
 }
 
 /// m 容器一页解析结果
@@ -536,8 +592,11 @@ class ContainerPage {
   final int total;
   final int nextPage;
 
-  const ContainerPage(
-      {this.statuses = const [], this.total = 0, this.nextPage = 0});
+  const ContainerPage({
+    this.statuses = const [],
+    this.total = 0,
+    this.nextPage = 0,
+  });
 }
 
 /// 热门流一页
@@ -563,8 +622,9 @@ String stripHtml(String html) {
   var s = html;
   s = s.replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n');
   s = s.replaceAllMapped(
-      RegExp(r'<img[^>]*\balt="([^"]*)"[^>]*>', caseSensitive: false),
-      (m) => m.group(1) ?? '');
+    RegExp(r'<img[^>]*\balt="([^"]*)"[^>]*>', caseSensitive: false),
+    (m) => m.group(1) ?? '',
+  );
   s = s.replaceAll(RegExp(r'<img[^>]*>', caseSensitive: false), '');
   s = s.replaceAll(RegExp(r'<[^>]+>'), '');
   s = s

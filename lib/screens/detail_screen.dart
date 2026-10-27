@@ -68,8 +68,11 @@ class _DetailScreenState extends State<DetailScreen> {
         final long = await svc.getLongText(id);
         if (mounted && long.isNotEmpty) {
           setState(() {
-            _status = _status.copyWith(text: long, textRaw: long,
-                isLongText: false);
+            _status = _status.copyWith(
+              text: long,
+              textRaw: long,
+              isLongText: false,
+            );
           });
         }
       } catch (_) {}
@@ -92,8 +95,10 @@ class _DetailScreenState extends State<DetailScreen> {
     }
     // 评论
     try {
-      final r = await svc.getComments(id,
-          authorUid: '${_status.user?.id ?? ''}');
+      final r = await svc.getComments(
+        id,
+        authorUid: '${_status.user?.id ?? ''}',
+      );
       if (mounted) {
         setState(() {
           _comments = r.comments;
@@ -154,10 +159,7 @@ class _DetailScreenState extends State<DetailScreen> {
         const Center(
           child: Padding(
             padding: EdgeInsets.all(24),
-            child: Text(
-              '转发列表访客不可见\n（服务端要求登录后查看）',
-              textAlign: TextAlign.center,
-            ),
+            child: Text('转发列表访客不可见\n（服务端要求登录后查看）', textAlign: TextAlign.center),
           ),
         ),
         _buildRelated(),
@@ -212,23 +214,25 @@ class _DetailScreenState extends State<DetailScreen> {
       body: LayoutBuilder(
         builder: (context, constraints) {
           if (constraints.maxWidth >= 900) {
-            // 桌面双栏：左栏正文+相关视频独立滚动，右栏固定宽评论面板。
+            // 桌面双栏：左栏只放帖子正文（铺满剩余宽度、独立滚动），
+            // 评论/点赞/转发/相关视频四页签整体只放右栏 420 面板，
+            // 高度铺满（fillHeight）、各页签独立滚动，左栏不重复出现。
             return Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
                   child: ListView(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 8,
+                    ),
                     children: _buildStatusOnly(context),
                   ),
                 ),
                 Container(
                   width: 420,
                   decoration: BoxDecoration(
-                    border: Border(
-                      left: BorderSide(color: cs.outlineVariant),
-                    ),
+                    border: Border(left: BorderSide(color: cs.outlineVariant)),
                   ),
                   child: _buildTabs(cs, fillHeight: true),
                 ),
@@ -291,8 +295,10 @@ class _DetailScreenState extends State<DetailScreen> {
         children: [
           Icon(Icons.sort, size: 16, color: cs.onSurfaceVariant),
           const SizedBox(width: 4),
-          Text('评论排序',
-              style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant)),
+          Text(
+            '评论排序',
+            style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant),
+          ),
           const Spacer(),
           PopupMenuButton<_CommentSort>(
             initialValue: _commentSort,
@@ -307,8 +313,10 @@ class _DetailScreenState extends State<DetailScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(_commentSort.label,
-                      style: TextStyle(fontSize: 13, color: cs.primary)),
+                  Text(
+                    _commentSort.label,
+                    style: TextStyle(fontSize: 13, color: cs.primary),
+                  ),
                   Icon(Icons.arrow_drop_down, size: 18, color: cs.primary),
                 ],
               ),
@@ -396,10 +404,9 @@ class _CommentTile extends StatelessWidget {
             onTap: user != null ? () => openProfile(context, user.id) : null,
             child: CircleAvatar(
               radius: 17,
-              backgroundImage:
-                  (user?.avatar.isNotEmpty ?? false)
-                      ? NetworkImage(user!.avatar)
-                      : null,
+              backgroundImage: (user?.avatar.isNotEmpty ?? false)
+                  ? NetworkImage(user!.avatar)
+                  : null,
               child: (user?.avatar.isEmpty ?? true)
                   ? const Icon(Icons.person, size: 17)
                   : null,
@@ -412,20 +419,31 @@ class _CommentTile extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(user?.screenName ?? '',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 13.5)),
+                    Text(
+                      user?.screenName ?? '',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13.5,
+                      ),
+                    ),
                     const Spacer(),
                     if (comment.likeCount > 0)
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.favorite_border,
-                              size: 14, color: cs.onSurfaceVariant),
+                          Icon(
+                            Icons.favorite_border,
+                            size: 14,
+                            color: cs.onSurfaceVariant,
+                          ),
                           const SizedBox(width: 3),
-                          Text(formatPlayCount(comment.likeCount),
-                              style: TextStyle(
-                                  fontSize: 12, color: cs.onSurfaceVariant)),
+                          Text(
+                            formatPlayCount(comment.likeCount),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: cs.onSurfaceVariant,
+                            ),
+                          ),
                         ],
                       ),
                   ],
@@ -436,8 +454,10 @@ class _CommentTile extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   [
-                    formatTimeAgo(parseWbTime(comment.createdAtRaw),
-                        fallback: comment.createdAtRaw),
+                    formatTimeAgo(
+                      parseWbTime(comment.createdAtRaw),
+                      fallback: comment.createdAtRaw,
+                    ),
                     if (comment.source.isNotEmpty) comment.source,
                   ].join(' · '),
                   style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),

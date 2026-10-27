@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:provider/provider.dart';
 
 import '../core/scroll_signal.dart';
 import '../models/models.dart';
 import '../services/weiyue_service.dart';
-import 'status_card.dart';
+import 'responsive_status_list.dart';
 
 /// 热门分类 feed：hottimeline + max_id/fresh_idx 游标分页。
 /// 换分类时父级换 Key 重建。
@@ -80,9 +79,11 @@ class _HotFeedViewState extends State<HotFeedView> {
       _error = null;
     });
     try {
-      final page = await context
-          .read<WeiyueService>()
-          .getHotTimeline(widget.channel, maxId: 0, freshIdx: 1);
+      final page = await context.read<WeiyueService>().getHotTimeline(
+        widget.channel,
+        maxId: 0,
+        freshIdx: 1,
+      );
       if (!mounted) return;
       setState(() {
         _items
@@ -118,9 +119,10 @@ class _HotFeedViewState extends State<HotFeedView> {
       while (attempts-- > 0 && !_ended) {
         _freshIdx += 1;
         final page = await context.read<WeiyueService>().getHotTimeline(
-            widget.channel,
-            maxId: _maxId,
-            freshIdx: _freshIdx);
+          widget.channel,
+          maxId: _maxId,
+          freshIdx: _freshIdx,
+        );
         if (page.statuses.isEmpty) {
           _ended = true;
           break;
@@ -183,46 +185,14 @@ class _HotFeedViewState extends State<HotFeedView> {
         ),
       );
     }
+    // 宽屏瀑布流/窄屏单列统一走 ResponsiveStatusList（列数见
+    // feedColumnCount：>=900 两列起，越宽越多列）。
     return RefreshIndicator(
       onRefresh: _loadFirst,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final width = constraints.maxWidth;
-          if (width >= 900) {
-            // 桌面宽屏：瀑布流多列（>=1400 三列，否则两列），
-            // footer 用 SliverToBoxAdapter 跨列置底。
-            return CustomScrollView(
-              controller: _scroll,
-              physics: const AlwaysScrollableScrollPhysics(),
-              slivers: [
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
-                  sliver: SliverMasonryGrid.count(
-                    crossAxisCount: width >= 1400 ? 3 : 2,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                    childCount: _items.length,
-                    itemBuilder: (context, i) =>
-                        StatusCard(status: _items[i]),
-                  ),
-                ),
-                SliverToBoxAdapter(child: _buildFooter()),
-              ],
-            );
-          }
-          return ListView.builder(
-            controller: _scroll,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            itemCount: _items.length + 1,
-            itemBuilder: (context, i) {
-              if (i == _items.length) return _buildFooter();
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: StatusCard(status: _items[i]),
-              );
-            },
-          );
-        },
+      child: ResponsiveStatusList(
+        items: _items,
+        controller: _scroll,
+        footer: _buildFooter(),
       ),
     );
   }

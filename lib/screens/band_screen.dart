@@ -29,8 +29,7 @@ class _BandScreenState extends State<BandScreen> {
 
   Future<void> _load() async {
     try {
-      final items =
-          await context.read<WeiyueService>().getBand(widget.segment);
+      final items = await context.read<WeiyueService>().getBand(widget.segment);
       if (!mounted) return;
       setState(() {
         _items = items;
@@ -51,61 +50,64 @@ class _BandScreenState extends State<BandScreen> {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: Text('${widget.title}热词榜')),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : _error != null
-                  ? Center(child: Text(_error!))
-                  : ListView.separated(
-                      itemCount: _items.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
-                      itemBuilder: (context, i) {
-                        final item = _items[i];
-                        final rank = item.realpos > 0 ? item.realpos : i + 1;
-                        return ListTile(
-                          leading: SizedBox(
-                            width: 28,
-                            child: Text('$rank',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: rank <= 3
-                                      ? const Color(0xFFE6162D)
-                                      : cs.onSurfaceVariant,
-                                )),
-                          ),
-                          title: Text(item.word),
-                          subtitle: item.category.isNotEmpty
-                              ? Text(item.category)
-                              : null,
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (item.label.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(right: 8),
-                                  child: Text(item.label,
-                                      style: const TextStyle(
-                                          color: Color(0xFFFF9406),
-                                          fontSize: 12)),
-                                ),
-                              Text(formatPlayCount(item.num),
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      color: cs.onSurfaceVariant)),
-                            ],
-                          ),
-                          onTap: () => Navigator.of(context)
-                              .push(MaterialPageRoute(
-                            builder: (_) =>
-                                SearchScreen(initialKeyword: item.word),
-                          )),
-                        );
-                      },
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? Center(child: Text(_error!))
+          : ListView.separated(
+              itemCount: _items.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, i) {
+                final item = _items[i];
+                final rank = item.realpos > 0 ? item.realpos : i + 1;
+                return ListTile(
+                  leading: SizedBox(
+                    width: 28,
+                    child: Text(
+                      '$rank',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: rank <= 3
+                            ? const Color(0xFFE6162D)
+                            : cs.onSurfaceVariant,
+                      ),
                     ),
-        ),
-      ),
+                  ),
+                  title: Text(item.word),
+                  subtitle: item.category.isNotEmpty
+                      ? Text(item.category)
+                      : null,
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (item.label.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: Text(
+                            item.label,
+                            style: const TextStyle(
+                              color: Color(0xFFFF9406),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      Text(
+                        formatPlayCount(item.num),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => SearchScreen(initialKeyword: item.word),
+                    ),
+                  ),
+                );
+              },
+            ),
     );
   }
 }
