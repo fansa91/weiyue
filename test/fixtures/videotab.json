@@ -1,0 +1,31 @@
+{
+ "data": {
+  "playlists": [
+   {
+    "name": "国务院联防联控机制",
+    "item_count": 36,
+    "id": 4617749025193999,
+    "id_str": "4617749025193999",
+    "is_pay": 0
+   },
+   {
+    "name": "新型冠状病毒感染肺炎",
+    "item_count": 82,
+    "id": 4617749025193998,
+    "id_str": "4617749025193998",
+    "is_pay": 0
+   },
+   {
+    "name": "国际疫情动态",
+    "item_count": 19,
+    "id": 4617749025193991,
+    "id_str": "4617749025193991",
+    "is_pay": 0
+   }
+  ],
+  "attitude_visible": 1,
+  "attitude_msg": "",
+  "icon": "https://h5.sinaimg.cn/upload/1011/55/2023/02/08/svideo_profile_video_like.png"
+ },
+ "ok": 1
+}

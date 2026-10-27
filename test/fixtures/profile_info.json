@@ -1,0 +1,45 @@
+{
+ "ok": 1,
+ "data": {
+  "user": {
+   "id": 1699432410,
+   "screen_name": "新华社",
+   "profile_image_url": "https://tvax2.sinaimg.cn/crop.58.61.875.875.50/001R0E0aly8h8vg6xx3srj60rs0rsdko02.jpg?KID=imgbed,tva&Expires=1793101189&ssig=8K0umozLuu",
+   "verified": true,
+   "verified_type": 3,
+   "followers_count": 114118609,
+   "followers_count_str": "1.14亿",
+   "friends_count": 3029,
+   "statuses_count": 207112,
+   "description": "新华社官方微博，重大新闻权威首发平台。",
+   "idstr": "1699432410",
+   "verified_reason": "新华社法人微博",
+   "location": "北京",
+   "status_total_counter": {
+    "total_cnt_format": "9.69亿",
+    "comment_cnt": "42,787,379",
+    "repost_cnt": "329,720,075",
+    "like_cnt": "596,398,006",
+    "total_cnt": "968,905,460"
+   }
+  },
+  "tabList": [
+   {
+    "name": "feed",
+    "tabName": "微博"
+   },
+   {
+    "name": "newVideo",
+    "tabName": "视频"
+   },
+   {
+    "name": "album",
+    "tabName": "相册"
+   },
+   {
+    "name": "article",
+    "tabName": "文章"
+   }
+  ]
+ }
+}

@@ -1,0 +1,27 @@
+{
+ "ok": 1,
+ "data": {
+  "band_list": [
+   {
+    "word": "肖战伴手礼17斤",
+    "word_scheme": "#肖战伴手礼17斤#",
+    "num": 1233572,
+    "hot_num": 1233572,
+    "category": "剧集",
+    "m_category": "剧集",
+    "realpos": 1,
+    "icon_desc": "新"
+   },
+   {
+    "word": "曝四字男星恋情瓜",
+    "word_scheme": "#曝四字男星恋情瓜#",
+    "num": 863500,
+    "hot_num": 863500,
+    "category": "艺人",
+    "m_category": "艺人",
+    "realpos": 2,
+    "icon_desc": "热"
+   }
+  ]
+ }
+}
