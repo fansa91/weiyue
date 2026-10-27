@@ -157,9 +157,9 @@ class _MeScreenState extends State<MeScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('关于 Weibo'),
+        title: const Text('关于微阅'),
         content: const Text(
-          'Weibo 1.0.0（只读版）\n\n'
+          '微阅 1.0.0（只读版）\n\n'
           '非官方第三方客户端，数据来自 weibo.com / m.weibo.cn 网页端公开接口'
           '（逆向整理见 WEIBO_API.md），以访客身份读取，不提供发博、评论、点赞等写操作。\n\n'
           '本应用仅供学习交流使用，与新浪微博官方无关。',

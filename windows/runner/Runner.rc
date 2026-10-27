@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "Weibo" "\0"
-            VALUE "FileDescription", "Weibo" "\0"
+            VALUE "CompanyName", "微阅" "\0"
+            VALUE "FileDescription", "微阅" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "weibo" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 Weibo. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 微阅. All rights reserved." "\0"
             VALUE "OriginalFilename", "weibo.exe" "\0"
-            VALUE "ProductName", "Weibo" "\0"
+            VALUE "ProductName", "微阅" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

@@ -48,7 +48,7 @@ class WeiboApp extends StatelessWidget {
     final settings = context.watch<SettingsService>();
     final seedColor = settings.effectiveSeedColor;
     return MaterialApp(
-      title: 'Weibo',
+      title: '微阅',
       debugShowCheckedModeBanner: false,
       themeMode: settings.themeMode,
       theme: buildTheme(brightness: Brightness.light, seedColor: seedColor),

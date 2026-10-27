@@ -26,7 +26,7 @@ class SettingsScreen extends StatelessWidget {
           const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.info_outline),
-            title: const Text('关于 Weibo'),
+            title: const Text('关于微阅'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _showAbout(context),
           ),
@@ -47,9 +47,9 @@ class SettingsScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('关于 Weibo'),
+        title: const Text('关于微阅'),
         content: const Text(
-          'Weibo 1.0.0（只读版）\n\n'
+          '微阅 1.0.0（只读版）\n\n'
           '非官方第三方客户端，接口来自 weibo.com / m.weibo.cn 网页端逆向整理'
           '（详见仓库文档 WEIBO_API.md 路径 ~/workspace/rea-probe/targets/weibo/）。\n\n'
           '本应用仅供学习交流使用。',
