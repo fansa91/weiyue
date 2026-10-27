@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../core/utils.dart';
 import '../models/models.dart';
-import '../services/weibo_service.dart';
+import '../services/weiyue_service.dart';
 import '../widgets/photo_gallery.dart';
 import '../widgets/status_card.dart';
 
@@ -38,7 +38,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   Future<void> _load() async {
-    final svc = context.read<WeiboService>();
+    final svc = context.read<WeiyueService>();
     try {
       final user = await svc.getProfileInfo(widget.uid);
       if (mounted) setState(() => _user = user);
@@ -52,7 +52,7 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   void _showDetail() async {
-    final svc = context.read<WeiboService>();
+    final svc = context.read<WeiyueService>();
     Map<String, dynamic> detail = const {};
     try {
       detail = await svc.getProfileDetail(widget.uid);
@@ -130,7 +130,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                       controller: _tabController,
                       labelColor: cs.primary,
                       tabs: const [
-                        Tab(text: '微博'),
+                        Tab(text: '动态'),
                         Tab(text: '视频'),
                         Tab(text: '相册'),
                       ],
@@ -145,14 +145,14 @@ class _ProfileScreenState extends State<ProfileScreen>
                   _PagedStatuses(
                     key: ValueKey('wb_${widget.uid}'),
                     loader: (page) => context
-                        .read<WeiboService>()
+                        .read<WeiyueService>()
                         .getUserStatuses(widget.uid, page: page)
                         .then((r) => r.statuses),
                   ),
                   _PagedStatuses(
                     key: ValueKey('vd_${widget.uid}'),
                     loader: (page) => context
-                        .read<WeiboService>()
+                        .read<WeiyueService>()
                         .getUserVideos(widget.uid, page: page)
                         .then((r) => r.statuses),
                     header: _playlists.isEmpty
@@ -276,7 +276,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                       children: [
                         _count('关注', user.friendsCount),
                         _count('粉丝', user.followersCount),
-                        _count('微博', user.statusesCount),
+                        _count('动态', user.statusesCount),
                       ],
                     ),
                   ],
@@ -448,7 +448,7 @@ class _AlbumTabState extends State<_AlbumTab> {
   Future<void> _load() async {
     try {
       final list =
-          await context.read<WeiboService>().getAlbumStatuses(widget.uid);
+          await context.read<WeiyueService>().getAlbumStatuses(widget.uid);
       if (mounted) {
         setState(() {
           _statuses = list;

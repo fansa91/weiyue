@@ -5,11 +5,11 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:weibo/core/theme.dart';
-import 'package:weibo/models/models.dart';
-import 'package:weibo/services/settings_service.dart';
-import 'package:weibo/services/visitor_service.dart';
-import 'package:weibo/services/weibo_service.dart';
+import 'package:weiyue/core/theme.dart';
+import 'package:weiyue/models/models.dart';
+import 'package:weiyue/services/settings_service.dart';
+import 'package:weiyue/services/visitor_service.dart';
+import 'package:weiyue/services/weiyue_service.dart';
 
 /// 构造测试用 WbStatus
 WbStatus makeStatus({
@@ -109,8 +109,8 @@ class FakeVisitorService extends VisitorService {
   Future<void> refreshAll() async {}
 }
 
-class FakeWeiboService extends WeiboService {
-  FakeWeiboService() : super(FakeVisitorService());
+class FakeWeiyueService extends WeiyueService {
+  FakeWeiyueService() : super(FakeVisitorService());
 
   bool failFeed = false;
   List<WbStatus> feedItems = [
@@ -138,7 +138,7 @@ class FakeWeiboService extends WeiboService {
   @override
   Future<HotPage> getHotTimeline(WbChannel channel,
       {int maxId = 0, int freshIdx = 1}) async {
-    if (failFeed) throw const WeiboException('网络错误：连接超时');
+    if (failFeed) throw const WeiyueException('网络错误：连接超时');
     return HotPage(statuses: feedItems, maxId: 0, freshIdx: freshIdx);
   }
 
@@ -277,15 +277,15 @@ ResponseBody jsonBody(Object body, {int status = 200}) {
 /// 测试用 MaterialApp 包裹：注入假服务 + SettingsService + 模板主题。
 Widget wrapWithProviders(
   Widget child, {
-  FakeWeiboService? weibo,
+  FakeWeiyueService? weibo,
   FakeVisitorService? visitor,
 }) {
-  final wb = weibo ?? FakeWeiboService();
+  final wb = weibo ?? FakeWeiyueService();
   final vs = visitor ?? FakeVisitorService();
   return MultiProvider(
     providers: [
       ChangeNotifierProvider<VisitorService>.value(value: vs),
-      Provider<WeiboService>.value(value: wb),
+      Provider<WeiyueService>.value(value: wb),
       ChangeNotifierProvider<SettingsService>(
           create: (_) => SettingsService()),
     ],

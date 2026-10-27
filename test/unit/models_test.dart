@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:weibo/models/models.dart';
+import 'package:weiyue/models/models.dart';
 
 Map<String, dynamic> fixture(String name) =>
     jsonDecode(File('test/fixtures/$name').readAsStringSync())

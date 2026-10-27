@@ -1,5 +1,5 @@
-name: weibo
-description: 微博 Flutter 只读客户端（基于 weibo.com / m.weibo.cn 网页接口逆向）
+name: weiyue
+description: "微阅：访客态只读客户端"
 publish_to: 'none'
 version: 1.0.0+1
 

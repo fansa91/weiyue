@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
-import '../services/weibo_service.dart';
+import '../services/weiyue_service.dart';
 import '../widgets/status_card.dart';
 import '../widgets/user_tile.dart';
 
@@ -55,7 +55,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _segment = 0;
     });
     try {
-      final result = await context.read<WeiboService>().search(keyword);
+      final result = await context.read<WeiyueService>().search(keyword);
       if (!mounted) return;
       setState(() {
         _result = result;
@@ -82,7 +82,7 @@ class _SearchScreenState extends State<SearchScreen> {
           autofocus: widget.autofocus,
           textInputAction: TextInputAction.search,
           decoration: const InputDecoration(
-            hintText: '搜索微博 / 用户',
+            hintText: '搜索动态 / 用户',
             border: InputBorder.none,
             filled: false,
           ),
@@ -107,7 +107,7 @@ class _SearchScreenState extends State<SearchScreen> {
                     segments: const [
                       ButtonSegment(value: 0, label: Text('综合')),
                       ButtonSegment(value: 1, label: Text('用户')),
-                      ButtonSegment(value: 2, label: Text('微博')),
+                      ButtonSegment(value: 2, label: Text('动态')),
                     ],
                     selected: {_segment},
                     onSelectionChanged: (s) =>
@@ -145,7 +145,7 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     final result = _result;
     if (result == null) {
-      return const Center(child: Text('输入关键词搜索微博与用户'));
+      return const Center(child: Text('输入关键词搜索动态与用户'));
     }
     final showUsers = _segment != 2;
     final showStatuses = _segment != 1;

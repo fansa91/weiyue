@@ -3,9 +3,9 @@ import 'package:dio/dio.dart';
 import '../models/models.dart';
 import 'visitor_service.dart';
 
-class WeiboException implements Exception {
+class WeiyueException implements Exception {
   final String message;
-  const WeiboException(this.message);
+  const WeiyueException(this.message);
   @override
   String toString() => message;
 }
@@ -20,14 +20,14 @@ List<dynamic> _asList(dynamic v) => v is List ? v : const [];
 
 /// 微博双栈只读接口（依据 WEIBO_API.md 实测结论）。
 /// PC 栈管热门/详情/资料/视频，m 栈管搜索/用户时间线/评论/点赞，两栈混用。
-class WeiboService {
+class WeiyueService {
   final VisitorService visitor;
 
   late final Dio _pc;
   late final Dio _m;
 
   /// [pcDio]/[mDio] 可注入（测试用假 adapter）。
-  WeiboService(this.visitor, {Dio? pcDio, Dio? mDio}) {
+  WeiyueService(this.visitor, {Dio? pcDio, Dio? mDio}) {
     _pc = pcDio ?? _makeDio();
     _m = mDio ?? _makeDio();
   }
@@ -67,7 +67,7 @@ class WeiboService {
         }),
       );
     } on DioException catch (e) {
-      throw WeiboException('网络错误：${e.message ?? e.type.name}');
+      throw WeiyueException('网络错误：${e.message ?? e.type.name}');
     }
     final status = resp.statusCode ?? 0;
     final data = resp.data;
@@ -84,10 +84,10 @@ class WeiboService {
       return _get(stack, url, query: query, referer: referer, retried: true);
     }
     if (visitorExpired) {
-      throw const WeiboException('访客身份失效，重试后仍被拦截');
+      throw const WeiyueException('访客身份失效，重试后仍被拦截');
     }
     if (json == null) {
-      throw WeiboException('接口返回非 JSON（HTTP $status）');
+      throw WeiyueException('接口返回非 JSON（HTTP $status）');
     }
     return json;
   }

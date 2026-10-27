@@ -34,7 +34,7 @@ class SettingsScreen extends StatelessWidget {
           const ListTile(
             leading: Icon(Icons.lock_outline),
             title: Text('访客模式说明'),
-            subtitle: Text('本应用以访客身份只读访问微博公开接口，'
+            subtitle: Text('本应用以访客身份只读访问平台公开接口，'
                 '不收集账号密码；评论仅显示热评，转发列表与关注流需登录。'),
           ),
           const SizedBox(height: 24),

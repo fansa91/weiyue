@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
-import '../services/weibo_service.dart';
+import '../services/weiyue_service.dart';
 import '../widgets/hot_feed_view.dart';
 
 /// 首页：热门推荐 + 子分类 chips（allGroups「我的频道」）
@@ -25,13 +25,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadChannels() async {
-    final result = await context.read<WeiboService>().getChannels();
+    final result = await context.read<WeiyueService>().getChannels();
     if (!mounted) return;
     setState(() {
       _channels = result.mine;
       _selected = result.mine.isNotEmpty
           ? result.mine.first
-          : WeiboService.fallbackChannels.first;
+          : WeiyueService.fallbackChannels.first;
       _loadingChannels = false;
     });
   }
@@ -41,7 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('微博 · 热门'),
+        title: const Text('微阅 · 热门'),
         centerTitle: false,
       ),
       body: Center(

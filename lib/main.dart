@@ -12,7 +12,7 @@ import 'screens/theme_screen.dart';
 import 'screens/video_tab_screen.dart';
 import 'services/settings_service.dart';
 import 'services/visitor_service.dart';
-import 'services/weibo_service.dart';
+import 'services/weiyue_service.dart';
 import 'widgets/detail_scaffold.dart';
 
 void main() async {
@@ -20,7 +20,7 @@ void main() async {
   MediaKit.ensureInitialized();
 
   final visitor = VisitorService();
-  final weibo = WeiboService(visitor);
+  final weibo = WeiyueService(visitor);
   final settings = SettingsService();
   await settings.init();
   // 启动即预热两栈访客身份（失败不阻塞进主界面，进页面时还会重试）
@@ -31,16 +31,16 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider<VisitorService>.value(value: visitor),
-        Provider<WeiboService>.value(value: weibo),
+        Provider<WeiyueService>.value(value: weibo),
         ChangeNotifierProvider<SettingsService>.value(value: settings),
       ],
-      child: const WeiboApp(),
+      child: const WeiyueApp(),
     ),
   );
 }
 
-class WeiboApp extends StatelessWidget {
-  const WeiboApp({super.key});
+class WeiyueApp extends StatelessWidget {
+  const WeiyueApp({super.key});
 
   @override
   Widget build(BuildContext context) {

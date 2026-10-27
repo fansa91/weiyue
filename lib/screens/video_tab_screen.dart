@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
-import '../services/weibo_service.dart';
+import '../services/weiyue_service.dart';
 import '../widgets/hot_feed_view.dart';
 
 /// 视频页签：推荐（热门）+ 视频向分类，拉 hottimeline 后过滤带视频的条目。
@@ -49,7 +49,7 @@ class _VideoTabScreenState extends State<VideoTabScreen> {
   }
 
   Future<void> _resolve() async {
-    final svc = context.read<WeiboService>();
+    final svc = context.read<WeiyueService>();
     for (final name in _tabs.keys) {
       if (name == '推荐') continue;
       final ch = await svc.channelByTitle(name);

@@ -2,7 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_image_mock/network_image_mock.dart';
-import 'package:weibo/widgets/status_card.dart';
+import 'package:weiyue/widgets/status_card.dart';
 
 import '../helpers/fakes.dart';
 

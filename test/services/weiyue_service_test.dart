@@ -3,9 +3,9 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:weibo/models/models.dart';
-import 'package:weibo/services/visitor_service.dart';
-import 'package:weibo/services/weibo_service.dart';
+import 'package:weiyue/models/models.dart';
+import 'package:weiyue/services/visitor_service.dart';
+import 'package:weiyue/services/weiyue_service.dart';
 
 import '../helpers/fakes.dart';
 
@@ -58,7 +58,7 @@ void main() {
           'max_id': 555,
           'fresh_idx': 2,
         }));
-    final svc = WeiboService(visitor, pcDio: _dio(adapter));
+    final svc = WeiyueService(visitor, pcDio: _dio(adapter));
 
     final page = await svc.getHotTimeline(_channel, maxId: 3, freshIdx: 4);
 
@@ -86,7 +86,7 @@ void main() {
     final searchJson =
         File('test/fixtures/m_search.json').readAsStringSync();
     final adapter = FakeAdapter((opt) async => jsonBody(searchJson));
-    final svc = WeiboService(visitor, mDio: _dio(adapter));
+    final svc = WeiyueService(visitor, mDio: _dio(adapter));
 
     final result = await svc.search('新华社');
 
@@ -125,7 +125,7 @@ void main() {
         },
       });
     });
-    final svc = WeiboService(visitor, mDio: _dio(adapter));
+    final svc = WeiyueService(visitor, mDio: _dio(adapter));
 
     final result = await svc.search('重试');
     expect(result.statuses.single.text, '重试后的微博');
@@ -133,13 +133,13 @@ void main() {
     expect(calls, 2);
   });
 
-  test('访客持续失效：重试一次后抛 WeiboException', () async {
+  test('访客持续失效：重试一次后抛 WeiyueException', () async {
     final visitor = CountingVisitor();
     final adapter =
         FakeAdapter((opt) async => jsonBody({'ok': -100, 'msg': 'blocked'}));
-    final svc = WeiboService(visitor, mDio: _dio(adapter));
+    final svc = WeiyueService(visitor, mDio: _dio(adapter));
 
-    await expectLater(svc.search('x'), throwsA(isA<WeiboException>()));
+    await expectLater(svc.search('x'), throwsA(isA<WeiyueException>()));
     expect(visitor.refreshCalls, 1);
     expect(adapter.requests.length, 2);
   });
@@ -165,7 +165,7 @@ void main() {
         ],
       });
     });
-    final svc = WeiboService(visitor, pcDio: _dio(adapter));
+    final svc = WeiyueService(visitor, pcDio: _dio(adapter));
 
     final page = await svc.getHotTimeline(_channel);
     expect(page.statuses.single.text, '302 后成功');

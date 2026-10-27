@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:weibo/services/visitor_service.dart';
+import 'package:weiyue/services/visitor_service.dart';
 
 import '../helpers/fakes.dart';
 
@@ -54,7 +54,7 @@ void main() {
     expect(prefs.getString('visitor_pc_sub'), 'SUBVALUE123');
     expect(prefs.getString('visitor_pc_subp'), 'SUBPVALUE456');
     expect(prefs.getInt('visitor_pc_ts'), isNotNull);
-    // 身份字段可拼出 Cookie（WeiboService 实际拼接方式）
+    // 身份字段可拼出 Cookie（WeiyueService 实际拼接方式）
     expect('SUB=${id.sub}; SUBP=${id.subp}',
         'SUB=SUBVALUE123; SUBP=SUBPVALUE456');
   });

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/models.dart';
-import '../services/weibo_service.dart';
+import '../services/weiyue_service.dart';
 import 'status_card.dart';
 
 /// 热门分类 feed：hottimeline + max_id/fresh_idx 游标分页。
@@ -59,7 +59,7 @@ class _HotFeedViewState extends State<HotFeedView> {
     });
     try {
       final page = await context
-          .read<WeiboService>()
+          .read<WeiyueService>()
           .getHotTimeline(widget.channel, maxId: 0, freshIdx: 1);
       if (!mounted) return;
       setState(() {
@@ -95,7 +95,7 @@ class _HotFeedViewState extends State<HotFeedView> {
       var added = 0;
       while (attempts-- > 0 && !_ended) {
         _freshIdx += 1;
-        final page = await context.read<WeiboService>().getHotTimeline(
+        final page = await context.read<WeiyueService>().getHotTimeline(
             widget.channel,
             maxId: _maxId,
             freshIdx: _freshIdx);

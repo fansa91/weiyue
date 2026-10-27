@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import '../core/nav.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
-import '../services/weibo_service.dart';
+import '../services/weiyue_service.dart';
 import '../widgets/status_card.dart';
 import '../widgets/user_tile.dart';
 
@@ -34,7 +34,7 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   Future<void> _load() async {
-    final svc = context.read<WeiboService>();
+    final svc = context.read<WeiyueService>();
     final id = _status.id;
     // 详情刷新（列表来的卡可能字段不全）
     try {
@@ -108,7 +108,7 @@ class _DetailScreenState extends State<DetailScreen> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('微博详情')),
+      appBar: AppBar(title: const Text('动态详情')),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         children: [

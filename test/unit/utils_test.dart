@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:weibo/core/utils.dart';
-import 'package:weibo/models/models.dart';
+import 'package:weiyue/core/utils.dart';
+import 'package:weiyue/models/models.dart';
 
 void main() {
   group('formatPlayCount', () {

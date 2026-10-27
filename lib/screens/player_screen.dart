@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../core/utils.dart';
 import '../models/models.dart';
-import '../services/weibo_service.dart';
+import '../services/weiyue_service.dart';
 import '../widgets/status_card.dart';
 
 /// 视频播放页：media_kit 播放，默认 <=720p 最高档，可切换画质；
@@ -54,7 +54,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _loadRelated() async {
     try {
       final list =
-          await context.read<WeiboService>().getRelatedVideos(_status.id);
+          await context.read<WeiyueService>().getRelatedVideos(_status.id);
       if (mounted) setState(() => _related = list);
     } catch (_) {}
   }

@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_image_mock/network_image_mock.dart';
-import 'package:weibo/main.dart';
-import 'package:weibo/screens/detail_screen.dart';
-import 'package:weibo/screens/discover_screen.dart';
-import 'package:weibo/screens/home_screen.dart';
-import 'package:weibo/screens/me_screen.dart';
-import 'package:weibo/screens/profile_screen.dart';
+import 'package:weiyue/main.dart';
+import 'package:weiyue/screens/detail_screen.dart';
+import 'package:weiyue/screens/discover_screen.dart';
+import 'package:weiyue/screens/home_screen.dart';
+import 'package:weiyue/screens/me_screen.dart';
+import 'package:weiyue/screens/profile_screen.dart';
 
 import '../helpers/fakes.dart';
 
@@ -35,7 +35,7 @@ void main() {
 
   testWidgets('HomeScreen：feed 失败显示错误与重试', (tester) async {
     await mockNetworkImagesFor(() async {
-      final fake = FakeWeiboService()..failFeed = true;
+      final fake = FakeWeiyueService()..failFeed = true;
       await tester.pumpWidget(
           wrapWithProviders(const HomeScreen(), weibo: fake));
       await _settle(tester);
@@ -46,7 +46,7 @@ void main() {
 
   testWidgets('HomeScreen：feed 为空显示空态', (tester) async {
     await mockNetworkImagesFor(() async {
-      final fake = FakeWeiboService()..feedItems = [];
+      final fake = FakeWeiyueService()..feedItems = [];
       await tester.pumpWidget(
           wrapWithProviders(const HomeScreen(), weibo: fake));
       await _settle(tester);
@@ -90,8 +90,8 @@ void main() {
       expect(find.text('测试博主'), findsWidgets);
       expect(find.text('1.2万'), findsOneWidget); // 粉丝 12345
       expect(find.text('100'), findsOneWidget); // 关注
-      expect(find.text('999'), findsOneWidget); // 微博数
-      expect(find.text('微博'), findsWidgets);
+      expect(find.text('999'), findsOneWidget); // 动态数
+      expect(find.text('动态'), findsWidgets);
       expect(find.text('视频'), findsWidgets);
       expect(find.text('相册'), findsWidgets);
       expect(find.textContaining('主页微博一', findRichText: true),

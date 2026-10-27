@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../core/utils.dart';
 import '../models/models.dart';
-import '../services/weibo_service.dart';
+import '../services/weiyue_service.dart';
 import 'band_screen.dart';
 import 'search_screen.dart';
 
@@ -42,7 +42,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
       _error = null;
     });
     try {
-      final r = await context.read<WeiboService>().getHotSearch();
+      final r = await context.read<WeiyueService>().getHotSearch();
       if (!mounted) return;
       setState(() {
         _gov = r.gov;
@@ -99,7 +99,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                           Icon(Icons.search,
                               size: 19, color: cs.onSurfaceVariant),
                           const SizedBox(width: 8),
-                          Text('搜索微博 / 用户',
+                          Text('搜索动态 / 用户',
                               style: TextStyle(
                                   color: cs.onSurfaceVariant, fontSize: 14)),
                         ],
@@ -133,7 +133,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 2),
-                  child: Text('微博热搜',
+                  child: Text('热搜榜',
                       style: Theme.of(context).textTheme.titleMedium),
                 ),
                 if (_loading)

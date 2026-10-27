@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../core/utils.dart';
 import '../models/models.dart';
-import '../services/weibo_service.dart';
+import '../services/weiyue_service.dart';
 import 'search_screen.dart';
 
 /// 分类热词榜（band_list）：点词跳搜索。
@@ -30,7 +30,7 @@ class _BandScreenState extends State<BandScreen> {
   Future<void> _load() async {
     try {
       final items =
-          await context.read<WeiboService>().getBand(widget.segment);
+          await context.read<WeiyueService>().getBand(widget.segment);
       if (!mounted) return;
       setState(() {
         _items = items;
