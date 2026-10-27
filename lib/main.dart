@@ -28,6 +28,8 @@ void main() async {
   // 启动即预热两栈访客身份（失败不阻塞进主界面，进页面时还会重试）
   visitor.ensure(WbStack.pc).catchError((_) => const VisitorIdentity('', '', 0));
   visitor.ensure(WbStack.m).catchError((_) => const VisitorIdentity('', '', 0));
+  // 表情映射异步装入（本地缓存优先，无缓存才拉 config；失败不阻塞）
+  weibo.loadEmoticons();
 
   runApp(
     MultiProvider(

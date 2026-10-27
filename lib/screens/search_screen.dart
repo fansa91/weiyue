@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -34,6 +36,8 @@ class _SearchScreenState extends State<SearchScreen> {
   String _keyword = '';
   int _segment = 0; // 0 综合 1 用户 2 微博
   List<String> _history = const [];
+  Timer? _suggestDebounce;
+  SearchSuggest? _suggest;
 
   @override
   void initState() {
@@ -53,9 +57,33 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void dispose() {
+    _suggestDebounce?.cancel();
     _searchFocus.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  /// 输入防抖（约 300ms）拉搜索建议；清空输入则回到历史区。
+  void _onQueryChanged(String value) {
+    _suggestDebounce?.cancel();
+    final q = value.trim();
+    if (q.isEmpty) {
+      if (_suggest != null) setState(() => _suggest = null);
+      return;
+    }
+    _suggestDebounce =
+        Timer(const Duration(milliseconds: 300), () => _fetchSuggest(q));
+  }
+
+  Future<void> _fetchSuggest(String q) async {
+    try {
+      final s = await context.read<WeiyueService>().getSearchSuggest(q);
+      // 输入已变化/已提交搜索则丢弃这次结果，避免旧建议闪现
+      if (!mounted || _controller.text.trim() != q || _result != null) return;
+      setState(() => _suggest = s);
+    } catch (_) {
+      // 建议失败不打扰：保持历史/提示区
+    }
   }
 
   Future<void> _loadHistory() async {
@@ -108,12 +136,14 @@ class _SearchScreenState extends State<SearchScreen> {
     final keyword = kw.trim();
     if (keyword.isEmpty) return;
     _recordHistory(keyword);
+    _suggestDebounce?.cancel();
     FocusScope.of(context).unfocus();
     setState(() {
       _loading = true;
       _error = null;
       _keyword = keyword;
       _segment = 0;
+      _suggest = null;
     });
     try {
       final result = await context.read<WeiyueService>().search(keyword);
@@ -149,6 +179,7 @@ class _SearchScreenState extends State<SearchScreen> {
             filled: false,
           ),
           onSubmitted: _doSearch,
+          onChanged: _onQueryChanged,
         ),
         actions: [
           TextButton(
@@ -207,6 +238,13 @@ class _SearchScreenState extends State<SearchScreen> {
     }
     final result = _result;
     if (result == null) {
+      // 有输入且建议非空 → 建议列表；否则（空输入/无建议）→ 历史区
+      final suggest = _suggest;
+      if (_controller.text.trim().isNotEmpty &&
+          suggest != null &&
+          !suggest.isEmpty) {
+        return _buildSuggestions(suggest);
+      }
       return _buildHistoryOrHint();
     }
     final showUsers = _segment != 2;
@@ -229,6 +267,37 @@ class _SearchScreenState extends State<SearchScreen> {
       return const Center(child: Text('没有找到相关结果'));
     }
     return ListView(children: children);
+  }
+
+  /// 输入中的建议列表：联想词行（点→直接搜该词）+ 推荐用户行（点→主页）。
+  Widget _buildSuggestions(SearchSuggest suggest) {
+    final cs = Theme.of(context).colorScheme;
+    return ListView(
+      children: [
+        for (final q in suggest.queries)
+          ListTile(
+            leading: Icon(Icons.search, size: 20, color: cs.onSurfaceVariant),
+            title: Text(q),
+            dense: true,
+            onTap: () {
+              _controller.text = q;
+              _doSearch(q);
+            },
+          ),
+        if (suggest.users.isNotEmpty) ...[
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+            child: Text('推荐用户',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurfaceVariant)),
+          ),
+          for (final u in suggest.users) UserTile(user: u),
+        ],
+      ],
+    );
   }
 
   /// 无结果时：有历史则展示「搜索历史」区（点击直达搜索，

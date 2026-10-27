@@ -1,0 +1,33 @@
+{
+ "ok": 1,
+ "data": {
+  "emoticon": {
+   "ZH_CN": {
+    "PC热门表情": [
+     {
+      "phrase": "[泪]",
+      "url": "https://face.t.sinajs.cn/t4/appstyle/expression/ext/normal/87/201810_lei_mobile.png"
+     },
+     {
+      "phrase": "[不愧是你]",
+      "url": "https://face.t.sinajs.cn/t4/appstyle/expression/ext/normal/2b/2025_ItsYou_mobile.png"
+     },
+     {
+      "phrase": "[流鼻血]",
+      "url": "https://face.t.sinajs.cn/t4/appstyle/expression/ext/normal/89/2025_liubixie_mobile.png"
+     }
+    ],
+    "其他": [
+     {
+      "phrase": "[心]",
+      "url": "https://face.t.sinajs.cn/t4/appstyle/expression/ext/normal/79/201810_xin_mobile.png"
+     },
+     {
+      "phrase": "[伤心]",
+      "url": "https://face.t.sinajs.cn/t4/appstyle/expression/ext/normal/d8/201810_shangxin_mobile.png"
+     }
+    ]
+   }
+  }
+ }
+}

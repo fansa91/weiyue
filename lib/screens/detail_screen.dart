@@ -68,23 +68,23 @@ class _DetailScreenState extends State<DetailScreen> {
         final long = await svc.getLongText(id);
         if (mounted && long.isNotEmpty) {
           setState(() {
-            _status = WbStatus(
-              id: _status.id,
-              mblogid: _status.mblogid,
-              user: _status.user,
-              text: long,
-              textRaw: long,
-              createdAt: _status.createdAt,
-              createdAtRaw: _status.createdAtRaw,
-              source: _status.source,
-              repostsCount: _status.repostsCount,
-              commentsCount: _status.commentsCount,
-              attitudesCount: _status.attitudesCount,
-              readsCount: _status.readsCount,
-              pics: _status.pics,
-              video: _status.video,
-              isLongText: false,
-              retweeted: _status.retweeted,
+            _status = _status.copyWith(text: long, textRaw: long,
+                isLongText: false);
+          });
+        }
+      } catch (_) {}
+    }
+    // 直播帖且 media_info 没带可播流：试 getLiveInfo 取流地址。
+    // ⚠️ 该接口访客态未实测（无直播样本），取不到就保持现状、静默。
+    if (_status.isLive &&
+        !_status.hasVideo &&
+        _status.pageObjectId.isNotEmpty) {
+      try {
+        final url = await svc.getLiveStreamUrl(_status.pageObjectId);
+        if (mounted && url != null && url.isNotEmpty) {
+          setState(() {
+            _status = _status.copyWith(
+              video: WbVideo(cover: _status.pagePic, fallbackUrl: url),
             );
           });
         }
@@ -431,7 +431,8 @@ class _CommentTile extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 2),
-                Text(comment.text, style: const TextStyle(fontSize: 14.5)),
+                // 与正文共用富文本渲染：话题可点、表情短码渲染成图
+                WbRichText(comment.text, fontSize: 14.5),
                 const SizedBox(height: 3),
                 Text(
                   [

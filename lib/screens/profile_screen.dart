@@ -5,11 +5,14 @@ import 'package:provider/provider.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
 import '../services/weiyue_service.dart';
+import '../widgets/detail_scaffold.dart';
 import '../widgets/photo_gallery.dart';
 import '../widgets/status_card.dart';
+import 'playlist_screen.dart';
 
-/// 用户主页：PC profile/info 头 + 三页签
-/// （微博 m 107603 / 视频 m 231567 / 相册 PC getImageWall+show 补图）。
+/// 用户主页：PC profile/info 头 + 五页签
+/// （动态 m 107603 / 视频 m 231567 / 精选 m 230283+getItem / 文章 m 231912 /
+/// 相册 albumlist→m 容器，旧 getImageWall+show 兜底）。
 class ProfileScreen extends StatefulWidget {
   final String uid;
   const ProfileScreen({super.key, required this.uid});
@@ -20,7 +23,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen>
     with SingleTickerProviderStateMixin {
-  late final _tabController = TabController(length: 3, vsync: this);
+  late final _tabController = TabController(length: 5, vsync: this);
   WbUser? _user;
   String? _error;
   List<WbPlaylist> _playlists = const [];
@@ -129,9 +132,13 @@ class _ProfileScreenState extends State<ProfileScreen>
                     TabBar(
                       controller: _tabController,
                       labelColor: cs.primary,
+                      isScrollable: true,
+                      tabAlignment: TabAlignment.start,
                       tabs: const [
                         Tab(text: '动态'),
                         Tab(text: '视频'),
+                        Tab(text: '精选'),
+                        Tab(text: '文章'),
                         Tab(text: '相册'),
                       ],
                     ),
@@ -158,6 +165,20 @@ class _ProfileScreenState extends State<ProfileScreen>
                     header: _playlists.isEmpty
                         ? null
                         : _buildPlaylists(context),
+                  ),
+                  _PagedStatuses(
+                    key: ValueKey('ft_${widget.uid}'),
+                    loader: (page) => context
+                        .read<WeiyueService>()
+                        .getUserFeatured(widget.uid, page: page)
+                        .then((r) => r.statuses),
+                  ),
+                  _PagedStatuses(
+                    key: ValueKey('ar_${widget.uid}'),
+                    loader: (page) => context
+                        .read<WeiyueService>()
+                        .getUserArticles(widget.uid, page: page)
+                        .then((r) => r.statuses),
                   ),
                   _AlbumTab(uid: widget.uid),
                 ],
@@ -191,10 +212,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                     avatar: const Icon(Icons.playlist_play, size: 17),
                     label: Text('${p.name} · ${p.itemCount}'),
                     onPressed: () {
-                      // v1 占位：合集二级页未做（videoalbumdetail 已在文档中确认）
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('合集详情页将在后续版本支持')),
-                      );
+                      Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => DetailScaffold(
+                          child: PlaylistScreen(playlist: p),
+                        ),
+                      ));
                     },
                   ),
                 );
@@ -426,7 +448,8 @@ class _PagedStatusesState extends State<_PagedStatuses> {
   }
 }
 
-/// 相册页签：getAlbumStatuses 已逐条 show 补图，这里汇成宫格。
+/// 相册页签：优先正规路径（albumlist → m 容器照片），失败/为空时回退
+/// 旧逻辑（getImageWall + 逐条 show 补图）。照片汇成宫格。
 class _AlbumTab extends StatefulWidget {
   final String uid;
   const _AlbumTab({required this.uid});
@@ -436,7 +459,7 @@ class _AlbumTab extends StatefulWidget {
 }
 
 class _AlbumTabState extends State<_AlbumTab> {
-  List<WbStatus> _statuses = const [];
+  List<List<WbPic>> _groups = const [];
   bool _loading = true;
 
   @override
@@ -446,28 +469,36 @@ class _AlbumTabState extends State<_AlbumTab> {
   }
 
   Future<void> _load() async {
+    final svc = context.read<WeiyueService>();
+    var groups = const <List<WbPic>>[];
     try {
-      final list =
-          await context.read<WeiyueService>().getAlbumStatuses(widget.uid);
-      if (mounted) {
-        setState(() {
-          _statuses = list;
-          _loading = false;
-        });
-      }
+      groups = await svc.getAlbumPhotoGroups(widget.uid);
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      groups = const [];
+    }
+    if (groups.isEmpty) {
+      // 兜底：旧逻辑逐条补图，图集即每条帖子的 pics
+      try {
+        final list = await svc.getAlbumStatuses(widget.uid);
+        groups = [for (final s in list) if (s.pics.isNotEmpty) s.pics];
+      } catch (_) {}
+    }
+    if (mounted) {
+      setState(() {
+        _groups = groups;
+        _loading = false;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
-    // 拍平：(所属微博的图集, 图下标)
+    // 拍平：(所属图集, 图下标)
     final flat = <(List<WbPic>, int)>[];
-    for (final s in _statuses) {
-      for (var i = 0; i < s.pics.length; i++) {
-        flat.add((s.pics, i));
+    for (final g in _groups) {
+      for (var i = 0; i < g.length; i++) {
+        flat.add((g, i));
       }
     }
     if (flat.isEmpty) return const Center(child: Text('暂无图片'));

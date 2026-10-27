@@ -1,5 +1,9 @@
-import 'package:dio/dio.dart';
+import 'dart:convert';
 
+import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../core/emoticons.dart';
 import '../models/models.dart';
 import 'visitor_service.dart';
 
@@ -90,6 +94,62 @@ class WeiyueService {
       throw WeiyueException('接口返回非 JSON（HTTP $status）');
     }
     return json;
+  }
+
+  /// 纯文本 GET（同 _get 的访客处理）：给返回 JSONP 的接口用
+  /// （m container/getItem 的响应被括号包裹，dio 的 JSON 解码接不住）。
+  Future<String> _getRaw(
+    WbStack stack,
+    String url, {
+    Map<String, dynamic>? query,
+    String? referer,
+    bool retried = false,
+  }) async {
+    final identity = await visitor.ensure(stack);
+    final dio = stack == WbStack.pc ? _pc : _m;
+    final Response<dynamic> resp;
+    try {
+      resp = await dio.get<dynamic>(
+        url,
+        queryParameters: query,
+        options: Options(
+          responseType: ResponseType.plain,
+          headers: {
+            'User-Agent': visitor.uaOf(stack),
+            'Referer': referer ??
+                (stack == WbStack.pc
+                    ? 'https://weibo.com/'
+                    : 'https://m.weibo.cn/'),
+            'X-Requested-With': 'XMLHttpRequest',
+            'Cookie': identity.cookie,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      throw WeiyueException('网络错误：${e.message ?? e.type.name}');
+    }
+    final status = resp.statusCode ?? 0;
+    final body = resp.data?.toString() ?? '';
+    final visitorExpired = status == 301 || status == 302 || status == 403;
+    if (visitorExpired && !retried) {
+      await visitor.refresh(stack);
+      return _getRaw(stack, url,
+          query: query, referer: referer, retried: true);
+    }
+    if (visitorExpired) {
+      throw const WeiyueException('访客身份失效，重试后仍被拦截');
+    }
+    return body;
+  }
+
+  /// 剥掉 JSONP 外层括号再解码（getItem 实测返回 `({...})`）。
+  static Map<String, dynamic> _decodeJsonp(String body) {
+    var t = body.trim();
+    if (t.startsWith('(') && t.endsWith(')')) {
+      t = t.substring(1, t.length - 1);
+    }
+    final d = jsonDecode(t);
+    return d is Map ? _asMap(d) : const {};
   }
 
   // ---------------- 分类 ----------------
@@ -331,13 +391,21 @@ class WeiyueService {
   ContainerPage _parseContainer(Map<String, dynamic> data) {
     final info = _asMap(data['cardlistInfo']);
     final statuses = <WbStatus>[];
-    for (final card in _asList(data['cards'])) {
-      final cm = _asMap(card);
-      final mblog = _asMap(cm['mblog']);
+    final seen = <String>{};
+    // 话题/文章等容器把 mblog 放在 card_type 11 的 card_group 里，递归收集
+    void walk(Map<String, dynamic> card) {
+      final mblog = _asMap(card['mblog']);
       if (mblog.isNotEmpty) {
         final s = WbStatus.fromJson(mblog);
-        if (s.id.isNotEmpty) statuses.add(s);
+        if (s.id.isNotEmpty && seen.add(s.id)) statuses.add(s);
       }
+      for (final g in _asList(card['card_group'])) {
+        walk(_asMap(g));
+      }
+    }
+
+    for (final card in _asList(data['cards'])) {
+      walk(_asMap(card));
     }
     final totalRaw = info['total'];
     final pageRaw = info['page'];
@@ -486,5 +554,311 @@ class WeiyueService {
       walk(_asMap(card));
     }
     return SearchResult(users: users, statuses: statuses);
+  }
+
+  // ---------------- 搜索建议 ----------------
+
+  /// PC /ajax/side/search：hotquery 联想词 + users 推荐用户（访客实测可读）。
+  Future<SearchSuggest> getSearchSuggest(String q) async {
+    final json = await _get(WbStack.pc, '$_pcBase/ajax/side/search',
+        query: {'q': q, 'page': 1});
+    final data = _asMap(json['data']);
+    final queries = <String>[];
+    for (final e in _asList(data['hotquery'])) {
+      final s = '${_asMap(e)['suggestion'] ?? ''}'.trim();
+      if (s.isNotEmpty && s != 'null' && !queries.contains(s)) queries.add(s);
+    }
+    final users = <WbUser>[];
+    for (final e in _asList(data['users'])) {
+      final u = WbUser.fromJson(_asMap(e));
+      if (u.id > 0) users.add(u);
+      if (users.length >= 5) break;
+    }
+    return SearchSuggest(queries: queries, users: users);
+  }
+
+  // ---------------- 话题页 ----------------
+
+  /// m 话题容器 231522type=1&q=#话题#（访客实测可读，cardlistInfo.page 翻页，
+  /// 与用户时间线同一套容器翻页规则）。
+  Future<ContainerPage> getTopicStatuses(String topic, {int page = 1}) async {
+    final data = await _container(
+      {
+        'containerid':
+            '231522type=1&q=${Uri.encodeComponent('#$topic#')}',
+        'page': page,
+      },
+      referer: 'https://m.weibo.cn/search',
+    );
+    return _parseContainer(data);
+  }
+
+  // ---------------- 主页精选 / 文章 ----------------
+
+  final Map<String, String> _featuredItemIds = {};
+
+  /// 精选容器 230283{uid} 根只回异步卡，须再用其 itemid 调 getItem
+  /// （响应为 JSONP 括号包裹）。访客实测两步均可读。
+  Future<ContainerPage> getUserFeatured(String uid, {int page = 1}) async {
+    var itemid = _featuredItemIds[uid];
+    if (itemid == null) {
+      final data = await _container(
+        {'type': 'uid', 'value': uid, 'containerid': '230283$uid', 'page': 1},
+        referer: 'https://m.weibo.cn/u/$uid',
+      );
+      for (final c in _asList(data['cards'])) {
+        final cm = _asMap(c);
+        final iid = '${cm['itemid'] ?? ''}';
+        if (iid.isNotEmpty && iid != 'null' && cm['async_api'] != null) {
+          itemid = iid;
+          break;
+        }
+      }
+      if (itemid == null) return const ContainerPage();
+      _featuredItemIds[uid] = itemid;
+    }
+    final body = await _getRaw(WbStack.m, '$_mBase/api/container/getItem',
+        query: {'itemid': itemid, 'page': page},
+        referer: 'https://m.weibo.cn/u/$uid');
+    final data = _asMap(_decodeJsonp(body)['data']);
+    final statuses = <WbStatus>[];
+    final seen = <String>{};
+    void walk(Map<String, dynamic> card) {
+      final mblog = _asMap(card['mblog']);
+      if (mblog.isNotEmpty) {
+        final s = WbStatus.fromJson(mblog);
+        if (s.id.isNotEmpty && seen.add(s.id)) statuses.add(s);
+      }
+      for (final g in _asList(card['card_group'])) {
+        walk(_asMap(g));
+      }
+    }
+
+    walk(data);
+    final totalRaw = data['total'];
+    return ContainerPage(
+      statuses: statuses,
+      total: totalRaw is num ? totalRaw.toInt() : statuses.length,
+      nextPage: statuses.isEmpty ? 0 : page + 1,
+    );
+  }
+
+  /// 文章容器 231912{uid}_-_ordinary：mblog 在 card_type 11 的 card_group 里，
+  /// 正文在 mblog.text（HTML），通用解析已处理（访客实测可读）。
+  Future<ContainerPage> getUserArticles(String uid, {int page = 1}) async {
+    final data = await _container(
+      {
+        'type': 'uid',
+        'value': uid,
+        'containerid': '231912${uid}_-_ordinary',
+        'page': page,
+      },
+      referer: 'https://m.weibo.cn/u/$uid',
+    );
+    return _parseContainer(data);
+  }
+
+  // ---------------- 表情 ----------------
+
+  static const _emoticonCacheKey = 'weiyue_emoticon_map_v1';
+  Map<String, String>? _emoticonMem;
+
+  /// 表情映射：内存 → SharedPreferences 落盘缓存 → 拉 statuses/config 解析。
+  /// config 全量约 747KB，解析后的映射只有几百条，只落盘小映射。
+  /// 任何失败返回空映射（正文保持 [泪] 原文显示），不抛错。
+  Future<Map<String, String>> getEmoticonMap() async {
+    final mem = _emoticonMem;
+    if (mem != null) return mem;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cached = prefs.getString(_emoticonCacheKey);
+      if (cached != null && cached.isNotEmpty) {
+        final decoded = jsonDecode(cached);
+        if (decoded is Map && decoded.isNotEmpty) {
+          final map = decoded.map((k, v) => MapEntry('$k', '$v'));
+          _emoticonMem = map;
+          return map;
+        }
+      }
+    } catch (_) {
+      // 落盘缓存损坏则当作无缓存，继续走网络
+    }
+    try {
+      final json =
+          await _get(WbStack.pc, '$_pcBase/ajax/statuses/config');
+      final map = parseEmoticonMap(_asMap(json['data']));
+      if (map.isNotEmpty) {
+        _emoticonMem = map;
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_emoticonCacheKey, jsonEncode(map));
+        } catch (_) {}
+        return map;
+      }
+    } catch (_) {}
+    return const {};
+  }
+
+  /// 启动后异步调用：装入表情映射并通知正文刷新（失败静默）。
+  Future<void> loadEmoticons() async {
+    try {
+      Emoticons.install(await getEmoticonMap());
+    } catch (_) {}
+  }
+
+  // ---------------- 视频合集详情 ----------------
+
+  /// 合集详情（访客实测，仅 playlist_id 一种参数形状成立）：
+  /// /ajax/profile/videoalbumdetail?playlist_id= → data.list 为完整帖子对象
+  /// （个别条目可能包在 video_detail_vo 里，一并解包），next_cursor 游标翻页。
+  Future<({List<WbStatus> statuses, int nextCursor})> getVideoAlbum(
+    String playlistId, {
+    int cursor = 0,
+  }) async {
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/profile/videoalbumdetail',
+      query: {
+        'playlist_id': playlistId,
+        if (cursor != 0) 'cursor': cursor,
+      },
+    );
+    final data = _asMap(json['data']);
+    final statuses = <WbStatus>[];
+    for (final item in _asList(data['list'])) {
+      final im = _asMap(item);
+      final vo = _asMap(im['video_detail_vo']);
+      final s = WbStatus.fromJson(vo.isNotEmpty ? vo : im);
+      if (s.id.isNotEmpty) statuses.add(s);
+    }
+    final nc = data['next_cursor'];
+    return (
+      statuses: statuses,
+      // 实测 next_cursor 是字符串形态，数字/字符串都接
+      nextCursor: nc is num
+          ? nc.toInt()
+          : (nc is String ? int.tryParse(nc) ?? -1 : -1),
+    );
+  }
+
+  // ---------------- 相册（正规接口） ----------------
+
+  /// 相册列表（访客实测可读）。getAlbumDetail 实测对访客恒返回空，
+  /// 照片走 albumlist 给出的 m 容器（containerid 内嵌 background 参数）。
+  Future<List<WbAlbum>> getAlbums(String uid) async {
+    final json = await _get(WbStack.pc, '$_pcBase/ajax/profile/albumlist',
+        query: {'uid': uid});
+    return _asList(json['data'])
+        .map((e) => WbAlbum.fromJson(_asMap(e)))
+        .where((a) => a.containerid.isNotEmpty)
+        .toList();
+  }
+
+  /// 相册照片：优先「原创」相册（containerid 含 camera_-_0），容器卡里
+  /// card_type 47 的 pics 数组即照片（small/middle/big/mw2000 四档）。
+  /// 返回按卡分组的照片列表；拿不到相册/照片时返回空，调用方回退旧逻辑。
+  Future<List<List<WbPic>>> getAlbumPhotoGroups(String uid) async {
+    final albums = await getAlbums(uid);
+    if (albums.isEmpty) return const [];
+    final pick = albums.firstWhere(
+      (a) => a.containerid.contains('camera_-_0'),
+      orElse: () => albums.firstWhere(
+        (a) => a.containerid.contains('photo'),
+        orElse: () => albums.first,
+      ),
+    );
+    final data = await _container(
+      {
+        'containerid': pick.containerid,
+        'background': 'ffffff',
+        'page': 1,
+      },
+      referer: 'https://m.weibo.cn/u/$uid',
+    );
+    final groups = <List<WbPic>>[];
+    void walk(Map<String, dynamic> card) {
+      final picsRaw = _asList(card['pics']);
+      if (picsRaw.isNotEmpty) {
+        final pics = <WbPic>[];
+        for (final p in picsRaw) {
+          final pm = _asMap(p);
+          String u(String k) => '${pm[k] ?? ''}'.replaceFirst('http://', 'https://');
+          final big = u('pic_big');
+          final original = u('pic_mw2000');
+          pics.add(WbPic(
+            pid: '${pm['pic_id'] ?? ''}',
+            thumbnail: u('pic_small'),
+            bmiddle: u('pic_middle'),
+            large: big,
+            original: original.isNotEmpty ? original : big,
+          ));
+        }
+        pics.removeWhere((p) => p.large.isEmpty && p.thumbnail.isEmpty);
+        if (pics.isNotEmpty) groups.add(pics);
+      }
+      for (final g in _asList(card['card_group'])) {
+        walk(_asMap(g));
+      }
+    }
+
+    for (final c in _asList(data['cards'])) {
+      walk(_asMap(c));
+    }
+    return groups;
+  }
+
+  // ---------------- 直播 ----------------
+
+  /// 直播流地址：/ajax/multimedia/getLiveInfo?live_id={object_id}。
+  /// ⚠️ 未实测：访客态找不到任何直播/回放帖样本，响应结构未知。
+  /// 这里只做防御性提取——在返回 JSON 里找形似流地址的字段，
+  /// 找不到/失败一律返回 null，调用方保持现状（不影响普通帖子）。
+  Future<String?> getLiveStreamUrl(String liveId) async {
+    try {
+      final json = await _get(
+        WbStack.pc,
+        '$_pcBase/ajax/multimedia/getLiveInfo',
+        query: {'live_id': liveId},
+      );
+      final data = _asMap(json['data']);
+      return _findStreamUrl(data.isNotEmpty ? data : json);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String? _findStreamUrl(dynamic node, {int depth = 0}) {
+    if (node == null || depth > 6) return null;
+    if (node is Map) {
+      for (final k in const [
+        'stream_url',
+        'flv_url',
+        'hls_url',
+        'live_url',
+        'replay_url',
+        'play_url',
+        'pull_url',
+        'url',
+      ]) {
+        final v = node[k];
+        if (v is String && v.contains('://')) {
+          return v.replaceFirst('http://', 'https://');
+        }
+      }
+      for (final v in node.values) {
+        final r = _findStreamUrl(v, depth: depth + 1);
+        if (r != null) return r;
+      }
+    } else if (node is List) {
+      for (final v in node) {
+        final r = _findStreamUrl(v, depth: depth + 1);
+        if (r != null) return r;
+      }
+    } else if (node is String &&
+        node.contains('://') &&
+        RegExp(r'\.(flv|m3u8)(\?|$)').hasMatch(node)) {
+      return node.replaceFirst('http://', 'https://');
+    }
+    return null;
   }
 }

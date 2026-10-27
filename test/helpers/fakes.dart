@@ -237,6 +237,55 @@ class FakeWeiyueService extends WeiyueService {
   Future<List<WbPlaylist>> getVideoTab(String uid) async => const [
         WbPlaylist(id: 'p1', name: '测试合集', itemCount: 36),
       ];
+
+  @override
+  Future<SearchSuggest> getSearchSuggest(String q) async =>
+      const SearchSuggest();
+
+  @override
+  Future<ContainerPage> getTopicStatuses(String topic, {int page = 1}) async =>
+      ContainerPage(
+          statuses:
+              page == 1 ? [makeStatus(id: 't1', text: '话题帖子一')] : const [],
+          total: 100,
+          nextPage: page + 1);
+
+  @override
+  Future<ContainerPage> getUserFeatured(String uid, {int page = 1}) async =>
+      ContainerPage(
+          statuses:
+              page == 1 ? [makeStatus(id: 'f1', text: '精选帖子一')] : const [],
+          total: 100,
+          nextPage: page + 1);
+
+  @override
+  Future<ContainerPage> getUserArticles(String uid, {int page = 1}) async =>
+      ContainerPage(
+          statuses:
+              page == 1 ? [makeStatus(id: 'a1', text: '文章帖子一')] : const [],
+          total: 5,
+          nextPage: page + 1);
+
+  @override
+  Future<({List<WbStatus> statuses, int nextCursor})> getVideoAlbum(
+          String playlistId,
+          {int cursor = 0}) async =>
+      (
+        statuses: [makeStatus(id: 'e1', text: '合集单集一', video: true)],
+        nextCursor: -1,
+      );
+
+  @override
+  Future<List<WbAlbum>> getAlbums(String uid) async => const [];
+
+  @override
+  Future<List<List<WbPic>>> getAlbumPhotoGroups(String uid) async => const [];
+
+  @override
+  Future<String?> getLiveStreamUrl(String liveId) async => null;
+
+  @override
+  Future<Map<String, String>> getEmoticonMap() async => const {};
 }
 
 /// 假 Dio adapter：记录请求并按 handler 返回。

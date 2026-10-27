@@ -208,6 +208,16 @@ class WbStatus {
   final bool isLongText;
   final WbStatus? retweeted;
 
+  /// page_info.object_id（视频/直播对象 id，直播取流 getLiveInfo 用）。
+  final String pageObjectId;
+
+  /// page_info 为直播型（type 或 object_type == live）。直播回放通常仍带
+  /// media_info 回放流；纯直播帖可能没有，需详情页再试 getLiveInfo。
+  final bool isLive;
+
+  /// page_info 封面（PC 为字符串、m 端为 {url} 对象），直播兜底封面用。
+  final String pagePic;
+
   const WbStatus({
     required this.id,
     this.mblogid = '',
@@ -225,9 +235,41 @@ class WbStatus {
     this.video,
     this.isLongText = false,
     this.retweeted,
+    this.pageObjectId = '',
+    this.isLive = false,
+    this.pagePic = '',
   });
 
   bool get hasVideo => video != null && video!.hasPlayable;
+
+  WbStatus copyWith({
+    String? text,
+    String? textRaw,
+    bool? isLongText,
+    WbVideo? video,
+  }) {
+    return WbStatus(
+      id: id,
+      mblogid: mblogid,
+      user: user,
+      text: text ?? this.text,
+      textRaw: textRaw ?? this.textRaw,
+      createdAt: createdAt,
+      createdAtRaw: createdAtRaw,
+      source: source,
+      repostsCount: repostsCount,
+      commentsCount: commentsCount,
+      attitudesCount: attitudesCount,
+      readsCount: readsCount,
+      pics: pics,
+      video: video ?? this.video,
+      isLongText: isLongText ?? this.isLongText,
+      retweeted: retweeted,
+      pageObjectId: pageObjectId,
+      isLive: isLive,
+      pagePic: pagePic,
+    );
+  }
 
   factory WbStatus.fromJson(Map<String, dynamic> j) {
     final rawText = _strOf(j['text_raw']);
@@ -268,10 +310,19 @@ class WbStatus {
       }
     }
 
-    // 视频：page_info.object_type == video，取流在 media_info.playback_list
+    // 视频/直播：PC page_info.object_type == 'video'/'live'；m 端 object_type
+    // 为数字（11=视频）且 type == 'video'/'live'。取流在 media_info.playback_list。
     WbVideo? video;
     final pageInfo = _mapOf(j['page_info']);
-    if (pageInfo.isNotEmpty && _strOf(pageInfo['object_type']) == 'video') {
+    final piType = _strOf(pageInfo['type']);
+    final piObjType = pageInfo['object_type'];
+    final isMediaPage = pageInfo.isNotEmpty &&
+        (piObjType == 'video' ||
+            piObjType == 'live' ||
+            piObjType == 11 ||
+            piType == 'video' ||
+            piType == 'live');
+    if (isMediaPage) {
       final mi = _mapOf(pageInfo['media_info']);
       final playbacks = <WbPlayback>[];
       for (final item in _listOf(mi['playback_list'])) {
@@ -290,7 +341,7 @@ class WbStatus {
       }
       playbacks.sort((a, b) => b.height.compareTo(a.height));
       final dur = mi['duration'];
-      var cover = httpsUrl(_strOf(pageInfo['page_pic']));
+      var cover = _pagePicOf(pageInfo);
       if (cover.isEmpty) {
         final picInfo = _mapOf(pageInfo['pic_info']);
         cover = httpsUrl(_strOf(_mapOf(picInfo['pic_big'])['url']));
@@ -325,7 +376,19 @@ class WbStatus {
       video: video,
       isLongText: _boolOf(j['isLongText']),
       retweeted: rtMap.isEmpty ? null : WbStatus.fromJson(rtMap),
+      pageObjectId: _strOf(pageInfo['object_id']),
+      isLive: piObjType == 'live' || piType == 'live',
+      pagePic: _pagePicOf(pageInfo),
     );
+  }
+
+  /// page_pic 两栈形态不一：PC 是 URL 字符串，m 端是 {url} 对象
+  /// （注意 _strOf 对 Map 会 toString，必须按运行时类型分发）。
+  static String _pagePicOf(Map<String, dynamic> pageInfo) {
+    final pp = pageInfo['page_pic'];
+    if (pp is String) return httpsUrl(pp);
+    final m = _mapOf(pp);
+    return m.isEmpty ? '' : httpsUrl(_strOf(m['url']));
   }
 }
 
@@ -524,4 +587,51 @@ String cleanSource(String raw) {
   var s = stripHtml(raw).trim();
   if (s.startsWith('来自')) s = s.substring(2).trim();
   return s;
+}
+
+/// 搜索建议（PC /ajax/side/search）：联想词 + 推荐用户。
+class SearchSuggest {
+  final List<String> queries;
+  final List<WbUser> users;
+
+  const SearchSuggest({this.queries = const [], this.users = const []});
+
+  bool get isEmpty => queries.isEmpty && users.isEmpty;
+}
+
+/// 用户相册（PC /ajax/profile/albumlist）。containerid 已剥掉
+/// `&background=ffffff` 后缀（拉取时作为独立参数传）。
+class WbAlbum {
+  final String title;
+  final String cover;
+  final String containerid;
+
+  const WbAlbum({this.title = '', this.cover = '', this.containerid = ''});
+
+  factory WbAlbum.fromJson(Map<String, dynamic> j) {
+    final raw = _strOf(j['containerid']);
+    return WbAlbum(
+      title: _strOf(j['pic_title']),
+      cover: httpsUrl(_strOf(j['pic'])),
+      containerid: raw.split('&').first,
+    );
+  }
+}
+
+/// 解析 statuses/config 的 data → 表情短码→图标 URL 映射。
+/// 结构：data.emoticon = {语言: {分类: [{phrase: "[泪]", url: ...}]}}，
+/// phrase 本身带方括号，正文里以原文形态出现。
+Map<String, String> parseEmoticonMap(Map<String, dynamic> data) {
+  final result = <String, String>{};
+  for (final lang in _mapOf(data['emoticon']).values) {
+    for (final cat in _mapOf(lang).values) {
+      for (final item in _listOf(cat)) {
+        final im = _mapOf(item);
+        final phrase = _strOf(im['phrase']);
+        final url = httpsUrl(_strOf(im['url']));
+        if (phrase.isNotEmpty && url.isNotEmpty) result[phrase] = url;
+      }
+    }
+  }
+  return result;
 }

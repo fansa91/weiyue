@@ -3,40 +3,61 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../core/emoticons.dart';
 import '../core/nav.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
 import 'cover_image.dart';
 import 'photo_gallery.dart';
 
-/// 正文富文本：高亮 #话题#、@用户、链接（点击行为：话题/用户进搜索/主页
-/// 需要上下文路由，这里只对 @ 与链接做可点处理，话题跳搜索页）。
-List<TextSpan> buildWbTextSpans(
+/// 正文富文本分段：高亮 #话题#、@用户、链接，并把 [表情] 短码换成行内
+/// 表情图（WidgetSpan）。话题点击默认打开话题页（见 WbRichText）；
+/// 表情映射未就绪时短码保持原文，映射到达后自动刷新（Emoticons.version）。
+List<InlineSpan> buildWbTextSpans(
   BuildContext context,
   String text, {
   TextStyle? baseStyle,
   void Function(String topic)? onTopicTap,
   void Function(String word)? onLinkTap,
+  double emoticonSize = 18,
 }) {
   final cs = Theme.of(context).colorScheme;
   final linkStyle = TextStyle(color: cs.primary);
-  final pattern = RegExp(r'#[^#\s][^#]*#|@[^\s:：,，]+|https?://[^\s]+');
-  final spans = <TextSpan>[];
+  final pattern =
+      RegExp(r'#[^#\s][^#]*#|@[^\s:：,，]+|https?://[^\s]+|\[[^\[\]\s]{1,16}\]');
+  final spans = <InlineSpan>[];
   var last = 0;
   for (final m in pattern.allMatches(text)) {
     if (m.start > last) spans.add(TextSpan(text: text.substring(last, m.start)));
     final token = m.group(0)!;
-    spans.add(TextSpan(
-      text: token,
-      style: linkStyle,
-      recognizer: token.startsWith('#')
-          ? (TapGestureRecognizer()
-            ..onTap = () => onTopicTap?.call(token))
-          : token.startsWith('@')
-              ? null
-              : (TapGestureRecognizer()
-                ..onTap = () => onLinkTap?.call(token)),
-    ));
+    if (token.startsWith('[')) {
+      final url = Emoticons.urlOf(token);
+      if (url != null && url.isNotEmpty) {
+        spans.add(WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: CachedNetworkImage(
+            imageUrl: url,
+            width: emoticonSize,
+            height: emoticonSize,
+            errorWidget: (_, _, _) => Text(token),
+          ),
+        ));
+      } else {
+        spans.add(TextSpan(text: token));
+      }
+    } else {
+      spans.add(TextSpan(
+        text: token,
+        style: linkStyle,
+        recognizer: token.startsWith('#')
+            ? (TapGestureRecognizer()
+              ..onTap = () => onTopicTap?.call(token))
+            : token.startsWith('@')
+                ? null
+                : (TapGestureRecognizer()
+                  ..onTap = () => onLinkTap?.call(token)),
+      ));
+    }
     last = m.end;
   }
   if (last < text.length) spans.add(TextSpan(text: text.substring(last)));
@@ -52,17 +73,26 @@ class WbRichText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text.rich(
-      TextSpan(
-        style: TextStyle(
-          fontSize: fontSize,
-          height: 1.45,
-          color: Theme.of(context).colorScheme.onSurface,
+    // 表情映射异步到达后，version 变化触发重建，正文短码换成表情图
+    return ValueListenableBuilder<int>(
+      valueListenable: Emoticons.version,
+      builder: (context, _, _) => Text.rich(
+        TextSpan(
+          style: TextStyle(
+            fontSize: fontSize,
+            height: 1.45,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+          children: buildWbTextSpans(
+            context,
+            text,
+            onTopicTap: (token) => openTopic(context, token),
+            emoticonSize: fontSize * 1.25,
+          ),
         ),
-        children: buildWbTextSpans(context, text),
+        maxLines: maxLines,
+        overflow: maxLines != null ? TextOverflow.ellipsis : TextOverflow.clip,
       ),
-      maxLines: maxLines,
-      overflow: maxLines != null ? TextOverflow.ellipsis : TextOverflow.clip,
     );
   }
 }
