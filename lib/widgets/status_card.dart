@@ -1,14 +1,17 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/gestures.dart';
+import 'package:provider/provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/emoticons.dart';
 import '../core/nav.dart';
+import '../core/quality.dart';
+import '../services/settings_service.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
 import 'cover_image.dart';
 import 'long_image_viewer.dart';
+import 'network_image.dart';
 
 /// 正文富文本分段：高亮 #话题#、@用户、链接，并把 [表情] 短码换成行内
 /// 表情图（WidgetSpan）。话题点击默认打开话题页（见 WbRichText）；
@@ -39,11 +42,11 @@ List<InlineSpan> buildWbTextSpans(
         spans.add(
           WidgetSpan(
             alignment: PlaceholderAlignment.middle,
-            child: CachedNetworkImage(
-              imageUrl: url,
+            child: NetImage(
+              url: url,
               width: emoticonSize,
               height: emoticonSize,
-              errorWidget: (_, _, _) => Text(token),
+              errorBuilder: (_) => Text(token),
             ),
           ),
         );
@@ -361,20 +364,22 @@ class _PicGrid extends StatelessWidget {
   /// 漏网时到这里）：不标「长图」、点图进详情走视频，不进长图阅读器。
   bool get _isVideoPost => status.hasVideo || status.isLive;
 
-  void _onTapPic(BuildContext context, int i) {
+  void _onTapPic(BuildContext context, int i, ImageQualityPref imageQuality) {
     if (_isVideoPost) {
       openDetail(context, status);
     } else {
-      openPicViewer(context, pics, i);
+      openPicViewer(context, pics, i, imageQuality: imageQuality);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // 列表用图档位跟随设置；改设置后列表即时重建换档。
+    final imageQuality = context.watch<SettingsService>().imageQuality;
     if (pics.length == 1) {
       final pic = pics.first;
       return GestureDetector(
-        onTap: () => _onTapPic(context, 0),
+        onTap: () => _onTapPic(context, 0, imageQuality),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(10),
           child: Stack(
@@ -384,11 +389,11 @@ class _PicGrid extends StatelessWidget {
                   maxHeight: 320,
                   maxWidth: 420,
                 ),
-                child: CachedNetworkImage(
-                  imageUrl: pic.bestMiddle,
+                child: NetImage(
+                  url: pic.feedUrl(imageQuality),
                   fit: BoxFit.cover,
-                  errorWidget: (_, _, _) => _errBox(context, height: 180),
-                  placeholder: (_, _) => _errBox(context, height: 180),
+                  errorBuilder: (_) => _errBox(context, height: 180),
+                  placeholderBuilder: (_) => _errBox(context, height: 180),
                 ),
               ),
               // 已知尺寸的长图：封顶高度裁剪展示 + 「长图」角标，
@@ -429,14 +434,14 @@ class _PicGrid extends StatelessWidget {
       itemCount: pics.length > 9 ? 9 : pics.length,
       itemBuilder: (context, i) {
         return GestureDetector(
-          onTap: () => _onTapPic(context, i),
+          onTap: () => _onTapPic(context, i, imageQuality),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(6),
-            child: CachedNetworkImage(
-              imageUrl: pics[i].bestMiddle,
+            child: NetImage(
+              url: pics[i].feedUrl(imageQuality),
               fit: BoxFit.cover,
-              errorWidget: (_, _, _) => _errBox(context),
-              placeholder: (_, _) => _errBox(context),
+              errorBuilder: (_) => _errBox(context),
+              placeholderBuilder: (_) => _errBox(context),
             ),
           ),
         );
@@ -471,10 +476,10 @@ class _VideoCover extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               if (video.cover.isNotEmpty)
-                CachedNetworkImage(
-                  imageUrl: video.cover,
+                NetImage(
+                  url: video.cover,
                   fit: BoxFit.cover,
-                  errorWidget: (_, _, _) => Container(color: Colors.black87),
+                  errorBuilder: (_) => Container(color: Colors.black87),
                 )
               else
                 Container(color: Colors.black87),

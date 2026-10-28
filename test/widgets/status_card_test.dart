@@ -1,4 +1,4 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:extended_image_plus/extended_image_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,26 +31,26 @@ void main() {
     expect(find.text('3'), findsOneWidget); // 转发数
     expect(find.text('5'), findsOneWidget); // 评论数
     expect(find.text('9'), findsOneWidget); // 点赞数
-    expect(find.byType(CachedNetworkImage), findsOneWidget); // 仅头像
+    expect(find.byType(ExtendedImage), findsOneWidget); // 仅头像
     expect(find.text('测试博主'), findsWidgets);
   });
 
   testWidgets('单图：正文 1 张图、无 GridView', (tester) async {
     await _pumpCard(tester, makeStatus(pics: 1));
     // 头像 1 + 正文图 1
-    expect(find.byType(CachedNetworkImage), findsNWidgets(2));
+    expect(find.byType(ExtendedImage), findsNWidgets(2));
     expect(find.byType(GridView), findsNothing);
   });
 
   testWidgets('四图宫格：GridView + 4 张图', (tester) async {
     await _pumpCard(tester, makeStatus(pics: 4));
     expect(find.byType(GridView), findsOneWidget);
-    expect(find.byType(CachedNetworkImage), findsNWidgets(5)); // 头像+4
+    expect(find.byType(ExtendedImage), findsNWidgets(5)); // 头像+4
   });
 
   testWidgets('九宫格：9 张图', (tester) async {
     await _pumpCard(tester, makeStatus(pics: 9));
-    expect(find.byType(CachedNetworkImage), findsNWidgets(10)); // 头像+9
+    expect(find.byType(ExtendedImage), findsNWidgets(10)); // 头像+9
   });
 
   testWidgets('视频封面：时长与播放量可见', (tester) async {

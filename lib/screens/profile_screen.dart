@@ -1,12 +1,13 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/utils.dart';
 import '../models/models.dart';
+import '../services/settings_service.dart';
 import '../services/weiyue_service.dart';
 import '../widgets/detail_scaffold.dart';
 import '../widgets/long_image_viewer.dart';
+import '../widgets/network_image.dart';
 import '../widgets/responsive_status_list.dart';
 import 'playlist_screen.dart';
 
@@ -253,8 +254,8 @@ class _ProfileScreenState extends State<ProfileScreen>
           height: 130,
           width: double.infinity,
           child: user.coverImagePhone.isNotEmpty
-              ? CachedNetworkImage(
-                  imageUrl: user.coverImagePhone,
+              ? NetImage(
+                  url: user.coverImagePhone,
                   fit: BoxFit.cover,
                 )
               : Container(color: cs.primaryContainer),
@@ -524,6 +525,9 @@ class _AlbumTabState extends State<_AlbumTab> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
+    // 相册宫格用图档位跟随设置；改设置后宫格即时重建换档。
+    final imageQuality =
+        context.watch<SettingsService>().imageQuality;
     // 拍平：(所属图集, 图下标)
     final flat = <(List<WbPic>, int)>[];
     for (final g in _groups) {
@@ -543,11 +547,16 @@ class _AlbumTabState extends State<_AlbumTab> {
       itemBuilder: (context, i) {
         final (pics, idx) = flat[i];
         return GestureDetector(
-          onTap: () => openPicViewer(context, pics, idx),
-          child: CachedNetworkImage(
-            imageUrl: pics[idx].bestMiddle,
+          onTap: () => openPicViewer(
+            context,
+            pics,
+            idx,
+            imageQuality: imageQuality,
+          ),
+          child: NetImage(
+            url: pics[idx].feedUrl(imageQuality),
             fit: BoxFit.cover,
-            errorWidget: (_, _, _) => Container(
+            errorBuilder: (_) => Container(
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
               child: const Icon(Icons.broken_image_outlined),
             ),

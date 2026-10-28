@@ -1,10 +1,10 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_image_mock/network_image_mock.dart';
 import 'package:weiyue/models/models.dart';
 import 'package:weiyue/screens/detail_screen.dart';
 import 'package:weiyue/widgets/long_image_viewer.dart';
+import 'package:weiyue/widgets/network_image.dart';
 import 'package:weiyue/widgets/status_card.dart';
 
 import '../helpers/fakes.dart';
@@ -24,8 +24,9 @@ const _video = WbVideo(
   fallbackUrl: 'https://example.com/v.mp4',
 );
 
+// 默认图片清晰度为「标准」→ 列表图取 bmiddle 档，NetImage 以此 URL 渲染。
 Finder _picImage() => find.byWidgetPredicate(
-      (w) => w is CachedNetworkImage && w.imageUrl == _longPic.bmiddle,
+      (w) => w is NetImage && w.url == _longPic.bmiddle,
     );
 
 void main() {
