@@ -145,16 +145,20 @@ class _LongImageReaderState extends State<LongImageReader> {
   Widget build(BuildContext context) {
     final pic = _pic;
     final isLong = _isLong[_index] == true;
+    final multi = widget.pics.length > 1;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
-        title: Text(
-          isLong
-              ? '长图 ${_index + 1} / ${widget.pics.length}'
-              : '${_index + 1} / ${widget.pics.length}',
-        ),
+        // 多图时才显示「第几页 / 总数」；单图只保留「长图」标识。
+        title: multi
+            ? Text(
+                isLong
+                    ? '长图 ${_index + 1} / ${widget.pics.length}'
+                    : '${_index + 1} / ${widget.pics.length}',
+              )
+            : (isLong ? const Text('长图') : null),
         actions: [
           IconButton(
             icon: const Icon(Icons.chevron_left),
@@ -181,7 +185,40 @@ class _LongImageReaderState extends State<LongImageReader> {
             ),
         ],
       ),
-      body: _scrollMode ? _buildScrollBody(pic) : _buildZoomBody(pic),
+      body: Stack(
+        children: [
+          _scrollMode ? _buildScrollBody(pic) : _buildZoomBody(pic),
+          // 多图时底部黑底页码（与图库一致），不拦截手势。
+          if (multi)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 16,
+              child: IgnorePointer(
+                child: Center(
+                  child: Container(
+                    key: const ValueKey('long-image-page-indicator'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.62),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${_index + 1} / ${widget.pics.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

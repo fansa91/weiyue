@@ -22,9 +22,12 @@ class FakePlayback implements InlinePlayback {
   int openCalls = 0;
   String? lastUrl;
   int toggleCalls = 0;
+  int playCalls = 0;
+  int pauseCalls = 0;
   bool disposed = false;
   final _width = StreamController<int?>.broadcast();
   final _height = StreamController<int?>.broadcast();
+  final _playing = StreamController<bool>.broadcast();
 
   @override
   Stream<int?> get widthStream => _width.stream;
@@ -33,9 +36,26 @@ class FakePlayback implements InlinePlayback {
   Stream<int?> get heightStream => _height.stream;
 
   @override
+  Stream<bool> get playingStream => _playing.stream;
+
+  @override
   Future<void> open(String url) async {
     openCalls++;
     lastUrl = url;
+    // 模拟 media_kit 开播即播放
+    _playing.add(true);
+  }
+
+  @override
+  Future<void> play() async {
+    playCalls++;
+    _playing.add(true);
+  }
+
+  @override
+  Future<void> pause() async {
+    pauseCalls++;
+    _playing.add(false);
   }
 
   @override
@@ -120,6 +140,58 @@ void main() {
       await _settle(tester);
       expect(fake.openCalls, 1);
       expect(find.text('FakeSurface'), findsOneWidget);
+    });
+  });
+
+  testWidgets('InlineVideoPlayer 暂停按钮：点暂停/续播走后端，图标跟随状态', (tester) async {
+    await mockNetworkImagesFor(() async {
+      final fake = FakePlayback();
+      await tester.pumpWidget(wrapWithProviders(
+        InlineVideoPlayer(
+          status: makeStatus(id: 'v1', video: true),
+          autoplay: true,
+          playbackFactory: _factoryOf(fake),
+        ),
+      ));
+      await _settle(tester);
+      expect(find.byIcon(Icons.pause), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('inline-player-pause')));
+      await _settle(tester);
+      expect(fake.pauseCalls, 1);
+      expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('inline-player-pause')));
+      await _settle(tester);
+      expect(fake.playCalls, 1);
+      expect(find.byIcon(Icons.pause), findsOneWidget);
+    });
+  });
+
+  testWidgets('InlineVideoPlayer 控制层自动隐藏：播放 3 秒后隐藏，点画面唤回，暂停时常显',
+      (tester) async {
+    await mockNetworkImagesFor(() async {
+      final fake = FakePlayback();
+      await tester.pumpWidget(wrapWithProviders(
+        InlineVideoPlayer(
+          status: makeStatus(id: 'v1', video: true),
+          autoplay: true,
+          playbackFactory: _factoryOf(fake),
+        ),
+      ));
+      await _settle(tester);
+      expect(find.byIcon(Icons.fullscreen), findsOneWidget);
+      // 播放中 3 秒无操作 -> 控制层隐藏
+      await tester.pump(const Duration(seconds: 4));
+      expect(find.byIcon(Icons.fullscreen), findsNothing);
+      expect(find.byKey(const ValueKey('inline-player-pause')), findsNothing);
+      // 点画面唤回
+      await tester.tap(find.text('FakeSurface'));
+      await _settle(tester);
+      expect(find.byIcon(Icons.fullscreen), findsOneWidget);
+      // 暂停后即使 4 秒过去也不隐藏
+      await tester.tap(find.byKey(const ValueKey('inline-player-pause')));
+      await _settle(tester);
+      await tester.pump(const Duration(seconds: 4));
+      expect(find.byIcon(Icons.fullscreen), findsOneWidget);
     });
   });
 

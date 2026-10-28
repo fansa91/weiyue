@@ -41,24 +41,60 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final multi = widget.pics.length > 1;
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
-        title: Text('${_index + 1} / ${widget.pics.length}'),
+        // 多图时才显示「第几页 / 总数」；单图不显示页码。
+        title: multi ? Text('${_index + 1} / ${widget.pics.length}') : null,
       ),
-      body: ExtendedImageGesturePageView.builder(
-        controller: _controller,
-        itemCount: widget.pics.length,
-        onPageChanged: (i) => setState(() => _index = i),
-        itemBuilder: (context, i) {
-          final pic = widget.pics[i];
-          return GestureImage(
-            url: pic.galleryUrl(widget.imageQuality),
-            inPageView: true,
-          );
-        },
+      body: Stack(
+        children: [
+          ExtendedImageGesturePageView.builder(
+            controller: _controller,
+            itemCount: widget.pics.length,
+            onPageChanged: (i) => setState(() => _index = i),
+            itemBuilder: (context, i) {
+              final pic = widget.pics[i];
+              return GestureImage(
+                url: pic.galleryUrl(widget.imageQuality),
+                inPageView: true,
+              );
+            },
+          ),
+          // 多图时底部黑底页码（AppBar 透明底在亮图上看不清时仍可读），
+          // 不拦截手势。
+          if (multi)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 16,
+              child: IgnorePointer(
+                child: Center(
+                  child: Container(
+                    key: const ValueKey('gallery-page-indicator'),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.62),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${_index + 1} / ${widget.pics.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
