@@ -8,6 +8,7 @@ import 'favorites_screen.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
 import 'theme_screen.dart';
+import '../widgets/about_dialog.dart';
 import '../widgets/detail_scaffold.dart';
 
 /// 我的：账号区（登录/已登录信息/退出）+ 访客状态卡 + 我的收藏入口
@@ -347,24 +348,6 @@ class _MeScreenState extends State<MeScreen> {
   }
 
   void _showAbout(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('关于微阅'),
-        content: const Text(
-          '微阅（只读版）\n\n'
-          '非官方第三方客户端，数据来自 weibo.com / m.weibo.cn 网页端公开接口'
-          '（逆向整理见 WEIBO_API.md），以访客身份或用户本人登录态读取，'
-          '不提供发博、评论、点赞等写操作。\n\n'
-          '本应用仅供学习交流使用，与平台官方无关。',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('知道了'),
-          ),
-        ],
-      ),
-    );
+    showDialog(context: context, builder: (_) => const WeiyueAboutDialog());
   }
 }
