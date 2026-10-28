@@ -227,7 +227,7 @@ class StatusCard extends StatelessWidget {
           // 图片宫格
           if (status.pics.isNotEmpty) ...[
             const SizedBox(height: 8),
-            _PicGrid(pics: status.pics),
+            _PicGrid(status: status),
           ],
           // 视频封面（详情页传 videoOverride 时换成内嵌播放器）
           if (status.hasVideo) ...[
@@ -339,7 +339,7 @@ class _RetweetedBlock extends StatelessWidget {
           ),
           if (status.pics.isNotEmpty) ...[
             const SizedBox(height: 6),
-            _PicGrid(pics: status.pics),
+            _PicGrid(status: status),
           ],
           if (status.hasVideo) ...[
             const SizedBox(height: 6),
@@ -352,15 +352,29 @@ class _RetweetedBlock extends StatelessWidget {
 }
 
 class _PicGrid extends StatelessWidget {
-  final List<WbPic> pics;
-  const _PicGrid({required this.pics});
+  final WbStatus status;
+  const _PicGrid({required this.status});
+
+  List<WbPic> get pics => status.pics;
+
+  /// 视频/直播帖的图片区只是兜底呈现（解析层已剔除混入的封面/视频帧，
+  /// 漏网时到这里）：不标「长图」、点图进详情走视频，不进长图阅读器。
+  bool get _isVideoPost => status.hasVideo || status.isLive;
+
+  void _onTapPic(BuildContext context, int i) {
+    if (_isVideoPost) {
+      openDetail(context, status);
+    } else {
+      openPicViewer(context, pics, i);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     if (pics.length == 1) {
       final pic = pics.first;
       return GestureDetector(
-        onTap: () => openPicViewer(context, pics, 0),
+        onTap: () => _onTapPic(context, 0),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(10),
           child: Stack(
@@ -378,8 +392,8 @@ class _PicGrid extends StatelessWidget {
                 ),
               ),
               // 已知尺寸的长图：封顶高度裁剪展示 + 「长图」角标，
-              // 点开进长图阅读器（宽撑满纵向滚动）。
-              if (pic.isLongImage)
+              // 点开进长图阅读器（宽撑满纵向滚动）。视频帖不标（见 _isVideoPost）。
+              if (!_isVideoPost && pic.isLongImage)
                 Positioned(
                   left: 8,
                   bottom: 8,
@@ -415,7 +429,7 @@ class _PicGrid extends StatelessWidget {
       itemCount: pics.length > 9 ? 9 : pics.length,
       itemBuilder: (context, i) {
         return GestureDetector(
-          onTap: () => openPicViewer(context, pics, i),
+          onTap: () => _onTapPic(context, i),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: CachedNetworkImage(

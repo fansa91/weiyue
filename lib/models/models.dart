@@ -295,62 +295,9 @@ class WbStatus {
         ? cleanWbText(rawText)
         : stripHtml(htmlText);
 
-    // 图片：PC 用 pic_ids + pic_infos{pid:{thumbnail/bmiddle/large/original:{url}}}
-    // m 端用 pics[{pid,url,large:{url}}]
-    final pics = <WbPic>[];
-    final picInfos = _mapOf(j['pic_infos']);
-    final picIds = _listOf(j['pic_ids']);
-    if (picInfos.isNotEmpty) {
-      final pids = picIds.isNotEmpty
-          ? picIds.map((e) => '$e').toList()
-          : picInfos.keys.toList();
-      for (final pid in pids) {
-        final info = _mapOf(picInfos[pid]);
-        if (info.isEmpty) continue;
-        String u(String k) => httpsUrl(_strOf(_mapOf(info[k])['url']));
-        // 尺寸：各档位对象除 url 外通常还带 width/height（数字或字符串），
-        // 优先 large，其次 original/bmiddle/thumbnail，取第一组有效值。
-        var w = 0, h = 0;
-        for (final k in ['large', 'original', 'bmiddle', 'thumbnail']) {
-          final sizeObj = _mapOf(info[k]);
-          w = _intOf(sizeObj['width']);
-          h = _intOf(sizeObj['height']);
-          if (w > 0 && h > 0) break;
-        }
-        pics.add(
-          WbPic(
-            pid: pid,
-            thumbnail: u('thumbnail'),
-            bmiddle: u('bmiddle'),
-            large: u('large'),
-            original: u('original'),
-            width: w,
-            height: h,
-          ),
-        );
-      }
-    } else {
-      for (final p in _listOf(j['pics'])) {
-        final pm = _mapOf(p);
-        if (pm.isEmpty) continue;
-        // m 端尺寸：large:{url,width,height} 或 geo:{width,height}
-        final largeObj = _mapOf(pm['large']);
-        final geo = _mapOf(pm['geo']);
-        pics.add(
-          WbPic(
-            pid: _strOf(pm['pid']),
-            thumbnail: httpsUrl(_strOf(pm['url'])),
-            bmiddle: httpsUrl(_strOf(pm['url'])),
-            large: httpsUrl(_strOf(largeObj['url'])),
-            width: _intOf(largeObj['width'] ?? geo['width']),
-            height: _intOf(largeObj['height'] ?? geo['height']),
-          ),
-        );
-      }
-    }
-
     // 视频/直播：PC page_info.object_type == 'video'/'live'；m 端 object_type
     // 为数字（11=视频）且 type == 'video'/'live'。取流在 media_info.playback_list。
+    // （提到图片解析之前：媒体帖的 pics 需要按视频侧条目过滤，见下。）
     WbVideo? video;
     final pageInfo = _mapOf(j['page_info']);
     final piType = _strOf(pageInfo['type']);
@@ -397,6 +344,76 @@ class WbStatus {
           _strOf(mi['stream_url_hd'] ?? mi['mp4_hd_url'] ?? mi['stream_url']),
         ),
       );
+    }
+
+    // 图片：PC 用 pic_ids + pic_infos{pid:{thumbnail/bmiddle/large/original:{url}}}
+    // m 端用 pics[{pid,url,large:{url}}]
+    // 视频/直播帖的 pics 会混入视频侧条目（封面/视频帧）：访客实证的图文+
+    // 视频混合帖里，pics 条数多于 pic_ids，多出的条目 pid 不在 pic_ids 内、
+    // 与 page_pic 同上传批次，尺寸取视频帧尺寸——竖长视频（帧高宽比 ≥2.5）
+    // 会被误判成长图。故媒体帖只保留 pid ∈ pic_ids 的真图片；pic_ids 为空
+    // 时整组丢弃（纯视频帖 pics 本就应为空，封面由 page_pic 呈现，不受影响；
+    // 视频合集/视频页签走 page_info 封面不用 pics，同样不受影响）。
+    final picIdSet = _listOf(j['pic_ids']).map((e) => '$e').toSet();
+    final coverPid = _strOf(_mapOf(pageInfo['page_pic'])['pid']);
+    bool keepPic(String pid) {
+      if (video == null) return true; // 非媒体帖：原样保留
+      if (pid.isNotEmpty && pid == coverPid) return false; // 封面本体
+      return picIdSet.contains(pid); // pic_ids 为空 → 全剔除
+    }
+
+    final pics = <WbPic>[];
+    final picInfos = _mapOf(j['pic_infos']);
+    final picIds = _listOf(j['pic_ids']);
+    if (picInfos.isNotEmpty) {
+      final pids = picIds.isNotEmpty
+          ? picIds.map((e) => '$e').toList()
+          : picInfos.keys.toList();
+      for (final pid in pids) {
+        final info = _mapOf(picInfos[pid]);
+        if (info.isEmpty) continue;
+        if (!keepPic(pid)) continue;
+        String u(String k) => httpsUrl(_strOf(_mapOf(info[k])['url']));
+        // 尺寸：各档位对象除 url 外通常还带 width/height（数字或字符串），
+        // 优先 large，其次 original/bmiddle/thumbnail，取第一组有效值。
+        var w = 0, h = 0;
+        for (final k in ['large', 'original', 'bmiddle', 'thumbnail']) {
+          final sizeObj = _mapOf(info[k]);
+          w = _intOf(sizeObj['width']);
+          h = _intOf(sizeObj['height']);
+          if (w > 0 && h > 0) break;
+        }
+        pics.add(
+          WbPic(
+            pid: pid,
+            thumbnail: u('thumbnail'),
+            bmiddle: u('bmiddle'),
+            large: u('large'),
+            original: u('original'),
+            width: w,
+            height: h,
+          ),
+        );
+      }
+    } else {
+      for (final p in _listOf(j['pics'])) {
+        final pm = _mapOf(p);
+        if (pm.isEmpty) continue;
+        if (!keepPic(_strOf(pm['pid']))) continue;
+        // m 端尺寸：large:{url,width,height} 或 geo:{width,height}
+        final largeObj = _mapOf(pm['large']);
+        final geo = _mapOf(pm['geo']);
+        pics.add(
+          WbPic(
+            pid: _strOf(pm['pid']),
+            thumbnail: httpsUrl(_strOf(pm['url'])),
+            bmiddle: httpsUrl(_strOf(pm['url'])),
+            large: httpsUrl(_strOf(largeObj['url'])),
+            width: _intOf(largeObj['width'] ?? geo['width']),
+            height: _intOf(largeObj['height'] ?? geo['height']),
+          ),
+        );
+      }
     }
 
     final userMap = _mapOf(j['user']);
