@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../core/nav.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
+import '../services/session_service.dart';
 import '../services/weiyue_service.dart';
 import '../widgets/inline_player.dart';
 import '../widgets/status_card.dart';
@@ -20,8 +21,10 @@ enum _CommentSort {
   const _CommentSort(this.label);
 }
 
-/// 微博详情：完整卡 + 长文补全 + 评论（热评）+ 点赞列表 + 相关视频页签。
-/// 转发列表访客不可见（服务端挡），做占位说明。
+/// 微博详情：完整卡 + 长文补全 + 评论 + 点赞列表 + 相关视频页签。
+/// 评论：访客态服务端只下发 1 条热评；登录后同一接口分页拉全
+/// （max_id 游标），评论内嵌回复（楼中楼）缩进展示。
+/// 转发列表访客不可见（服务端挡），登录后接 repostTimeline。
 class DetailScreen extends StatefulWidget {
   final WbStatus status;
 
@@ -42,10 +45,17 @@ class _DetailScreenState extends State<DetailScreen> {
   late WbStatus _status = widget.status;
   List<WbComment> _comments = const [];
   int _commentTotal = 0;
+  int _commentMaxId = 0;
   bool _commentsLoading = true;
+  bool _commentsLoadingMore = false;
   List<WbAttitude> _attitudes = const [];
   bool _attitudesLoading = true;
   List<WbStatus> _related = const [];
+  List<WbStatus> _reposts = const [];
+  int _repostPage = 0;
+  int _repostMaxPage = 0;
+  bool _repostsRequested = false;
+  bool _repostsLoading = false;
   _CommentSort _commentSort = _CommentSort.server;
 
   @override
@@ -103,6 +113,7 @@ class _DetailScreenState extends State<DetailScreen> {
         setState(() {
           _comments = r.comments;
           _commentTotal = r.total;
+          _commentMaxId = r.maxId;
           _commentsLoading = false;
         });
       }
@@ -130,6 +141,78 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
+  /// 评论续拉（登录态 max_id 游标分页；访客态 max_id 恒 0 不会触发）。
+  Future<void> _loadMoreComments() async {
+    if (_commentsLoadingMore || _commentMaxId == 0) return;
+    setState(() => _commentsLoadingMore = true);
+    try {
+      final r = await context.read<WeiyueService>().getComments(
+        _status.id,
+        authorUid: '${_status.user?.id ?? ''}',
+        maxId: _commentMaxId,
+      );
+      if (mounted) {
+        setState(() {
+          final seen = _comments.map((c) => c.id).toSet();
+          _comments = [
+            ..._comments,
+            ...r.comments.where((c) => seen.add(c.id)),
+          ];
+          _commentMaxId = r.maxId;
+          if (r.total > 0) _commentTotal = r.total;
+        });
+      }
+    } catch (_) {
+      // 续拉失败静默，用户可再点
+    } finally {
+      if (mounted) setState(() => _commentsLoadingMore = false);
+    }
+  }
+
+  /// 转发列表首拉（登录态，进页签时懒触发）。
+  Future<void> _loadReposts() async {
+    if (_repostsLoading) return;
+    setState(() => _repostsLoading = true);
+    try {
+      final r = await context.read<WeiyueService>().getReposts(
+        _status.id,
+        page: 1,
+      );
+      if (mounted) {
+        setState(() {
+          _reposts = r.items;
+          _repostPage = 1;
+          _repostMaxPage = r.maxPage;
+          _repostsLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _repostsLoading = false);
+    }
+  }
+
+  Future<void> _loadMoreReposts() async {
+    if (_repostsLoading || _repostPage >= _repostMaxPage) return;
+    setState(() => _repostsLoading = true);
+    try {
+      final r = await context.read<WeiyueService>().getReposts(
+        _status.id,
+        page: _repostPage + 1,
+      );
+      if (mounted) {
+        setState(() {
+          final seen = _reposts.map((s) => s.id).toSet();
+          _reposts = [..._reposts, ...r.items.where((s) => seen.add(s.id))];
+          _repostPage += 1;
+          if (r.maxPage > 0) _repostMaxPage = r.maxPage;
+          _repostsLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _repostsLoading = false);
+    }
+  }
+
   /// 帖子正文（窄屏与宽屏左栏共用）。视频帖在卡内封面位置
   /// 换成内嵌播放器，进入详情即按设置自动播放预览。
   List<Widget> _buildStatusOnly(BuildContext context) {
@@ -152,16 +235,12 @@ class _DetailScreenState extends State<DetailScreen> {
   /// 评论/点赞/转发/相关视频四页签。窄屏用固定高 520；宽屏右栏
   /// [fillHeight] 时用 Expanded 撑满面板高度，各页签列表独立滚动。
   Widget _buildTabs(ColorScheme cs, {bool fillHeight = false}) {
+    final loggedIn = context.watch<SessionService>().isLoggedIn;
     final tabBarView = TabBarView(
       children: [
-        _buildComments(cs),
+        _buildComments(cs, loggedIn: loggedIn),
         _buildAttitudes(),
-        const Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Text('转发列表访客不可见\n（服务端要求登录后查看）', textAlign: TextAlign.center),
-          ),
-        ),
+        _buildRepostsTab(loggedIn),
         _buildRelated(),
       ],
     );
@@ -201,6 +280,57 @@ class _DetailScreenState extends State<DetailScreen> {
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: StatusCard(status: s),
+          ),
+      ],
+    );
+  }
+
+  /// 转发页签：未登录保持占位说明；登录后懒加载 repostTimeline 并分页。
+  Widget _buildRepostsTab(bool loggedIn) {
+    if (!loggedIn) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text('转发列表访客不可见\n（服务端要求登录后查看）', textAlign: TextAlign.center),
+        ),
+      );
+    }
+    if (!_repostsRequested) {
+      _repostsRequested = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadReposts();
+      });
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_repostsLoading && _reposts.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_reposts.isEmpty) {
+      return const Center(child: Text('暂无转发'));
+    }
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      children: [
+        for (final s in _reposts)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: StatusCard(status: s),
+          ),
+        if (_repostPage < _repostMaxPage)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Center(
+              child: _repostsLoading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : OutlinedButton(
+                      onPressed: _loadMoreReposts,
+                      child: const Text('加载更多转发'),
+                    ),
+            ),
           ),
       ],
     );
@@ -327,15 +457,16 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
-  Widget _buildComments(ColorScheme cs) {
+  Widget _buildComments(ColorScheme cs, {required bool loggedIn}) {
     if (_commentsLoading) {
       return const Center(child: CircularProgressIndicator());
     }
     final sorted = _sortedComments();
+    final hasMore = _commentMaxId != 0 && _comments.length < _commentTotal;
     return ListView(
       children: [
         _buildSortBar(cs),
-        if (_commentTotal > _comments.length)
+        if (!loggedIn && _commentTotal > _comments.length)
           Container(
             margin: const EdgeInsets.fromLTRB(8, 10, 8, 2),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -362,6 +493,24 @@ class _DetailScreenState extends State<DetailScreen> {
             child: Center(child: Text('暂无评论')),
           ),
         for (final c in sorted) _CommentTile(comment: c),
+        if (hasMore)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            child: Center(
+              child: _commentsLoadingMore
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : OutlinedButton(
+                      onPressed: _loadMoreComments,
+                      child: Text(
+                        '加载更多评论（已显示 ${_comments.length} / 共 $_commentTotal 条）',
+                      ),
+                    ),
+            ),
+          ),
       ],
     );
   }
@@ -462,7 +611,81 @@ class _CommentTile extends StatelessWidget {
                   ].join(' · '),
                   style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
                 ),
+                // 楼中楼：接口内嵌的 replies 缩进展示（无独立楼层接口，只这一层）
+                if (comment.replies.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerHighest.withValues(alpha: 0.45),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 2),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (final r in comment.replies) _ReplyTile(reply: r),
+                      ],
+                    ),
+                  ),
+                ],
                 const Divider(height: 14),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 楼中楼单条回复（评论内嵌 comments 子列表项，缩进小字号）。
+class _ReplyTile extends StatelessWidget {
+  final WbComment reply;
+  const _ReplyTile({required this.reply});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final user = reply.user;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GestureDetector(
+            onTap: user != null ? () => openProfile(context, user.id) : null,
+            child: CircleAvatar(
+              radius: 12,
+              backgroundImage: (user?.avatar.isNotEmpty ?? false)
+                  ? NetworkImage(user!.avatar)
+                  : null,
+              child: (user?.avatar.isEmpty ?? true)
+                  ? const Icon(Icons.person, size: 12)
+                  : null,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  user?.screenName ?? '',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                WbRichText(reply.text, fontSize: 13.5),
+                const SizedBox(height: 2),
+                Text(
+                  formatTimeAgo(
+                    parseWbTime(reply.createdAtRaw),
+                    fallback: reply.createdAtRaw,
+                  ),
+                  style: TextStyle(fontSize: 11.5, color: cs.onSurfaceVariant),
+                ),
               ],
             ),
           ),

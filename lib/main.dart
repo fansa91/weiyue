@@ -12,6 +12,7 @@ import 'screens/search_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/theme_screen.dart';
 import 'screens/video_tab_screen.dart';
+import 'services/session_service.dart';
 import 'services/settings_service.dart';
 import 'services/visitor_service.dart';
 import 'services/weiyue_service.dart';
@@ -22,7 +23,9 @@ void main() async {
   MediaKit.ensureInitialized();
 
   final visitor = VisitorService();
-  final weibo = WeiyueService(visitor);
+  final session = SessionService();
+  await session.init();
+  final weibo = WeiyueService(visitor, session: session);
   final settings = SettingsService();
   await settings.init();
   // 启动即预热两栈访客身份（失败不阻塞进主界面，进页面时还会重试）
@@ -40,6 +43,7 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider<VisitorService>.value(value: visitor),
+        ChangeNotifierProvider<SessionService>.value(value: session),
         Provider<WeiyueService>.value(value: weibo),
         ChangeNotifierProvider<SettingsService>.value(value: settings),
       ],

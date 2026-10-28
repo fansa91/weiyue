@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:weiyue/core/theme.dart';
 import 'package:weiyue/models/models.dart';
+import 'package:weiyue/services/session_service.dart';
 import 'package:weiyue/services/settings_service.dart';
 import 'package:weiyue/services/visitor_service.dart';
 import 'package:weiyue/services/weiyue_service.dart';
@@ -63,17 +64,19 @@ WbStatus makeStatus({
             onlineUsers: '15.4万次观看',
             playbackList: [
               WbPlayback(
-                  label: 'mp4_720p',
-                  width: 1280,
-                  height: 720,
-                  url: 'https://example.com/v720.mp4',
-                  bitrate: 1158368),
+                label: 'mp4_720p',
+                width: 1280,
+                height: 720,
+                url: 'https://example.com/v720.mp4',
+                bitrate: 1158368,
+              ),
               WbPlayback(
-                  label: 'mp4_hd',
-                  width: 852,
-                  height: 480,
-                  url: 'https://example.com/v480.mp4',
-                  bitrate: 605066),
+                label: 'mp4_hd',
+                width: 852,
+                height: 480,
+                url: 'https://example.com/v480.mp4',
+                bitrate: 605066,
+              ),
             ],
           )
         : null,
@@ -87,7 +90,11 @@ class FakeVisitorService extends VisitorService {
   int refreshCalls = 0;
   FakeVisitorService({this.has = true});
 
-  static const _identity = VisitorIdentity('TESTSUB', 'TESTSUBP', 1793000000000);
+  static const _identity = VisitorIdentity(
+    'TESTSUB',
+    'TESTSUBP',
+    1793000000000,
+  );
 
   @override
   VisitorIdentity? identityOf(WbStack stack) => has ? _identity : null;
@@ -109,6 +116,48 @@ class FakeVisitorService extends VisitorService {
   Future<void> refreshAll() async {}
 }
 
+/// 假登录会话：只覆盖 UI/请求层读得到的 getter，不碰真实存储。
+/// Cookie 值是假的测试串（FAKE_*），与真实用户 Cookie 无关。
+class FakeSessionService extends SessionService {
+  bool loggedIn;
+  bool expiredFlag;
+  FakeSessionService({this.loggedIn = false, this.expiredFlag = false});
+
+  @override
+  bool get isLoggedIn => loggedIn;
+
+  @override
+  bool get expired => expiredFlag;
+
+  @override
+  String get uid => loggedIn ? '777' : '';
+
+  @override
+  String get screenName => loggedIn ? '登录测试号' : '';
+
+  @override
+  String get avatar => '';
+
+  @override
+  bool? get pcUnlocked => loggedIn ? true : null;
+
+  @override
+  bool? get mUnlocked => loggedIn ? false : null;
+
+  @override
+  bool hasUsableCookie(WbStack stack) => loggedIn;
+
+  @override
+  String? cookieHeaderFor(WbStack stack) =>
+      loggedIn ? 'SUB=FAKE_SUB; SUBP=FAKE_SUBP' : null;
+
+  @override
+  Future<void> clear() async {
+    loggedIn = false;
+    notifyListeners();
+  }
+}
+
 class FakeWeiyueService extends WeiyueService {
   FakeWeiyueService() : super(FakeVisitorService());
 
@@ -120,41 +169,46 @@ class FakeWeiyueService extends WeiyueService {
 
   @override
   Future<({List<WbChannel> mine, List<WbChannel> recommended})>
-      getChannels() async => (
-            mine: const [
-              WbChannel(gid: '102803', title: '热门', containerid: '102803'),
-              WbChannel(
-                  gid: '1028034188',
-                  title: '社会',
-                  containerid: '102803_ctg1_4188_-_ctg1_4188'),
-              WbChannel(
-                  gid: '1028032088',
-                  title: '科技',
-                  containerid: '102803_ctg1_2088_-_ctg1_2088'),
-            ],
-            recommended: const <WbChannel>[],
-          );
+  getChannels() async => (
+    mine: const [
+      WbChannel(gid: '102803', title: '热门', containerid: '102803'),
+      WbChannel(
+        gid: '1028034188',
+        title: '社会',
+        containerid: '102803_ctg1_4188_-_ctg1_4188',
+      ),
+      WbChannel(
+        gid: '1028032088',
+        title: '科技',
+        containerid: '102803_ctg1_2088_-_ctg1_2088',
+      ),
+    ],
+    recommended: const <WbChannel>[],
+  );
 
   @override
-  Future<HotPage> getHotTimeline(WbChannel channel,
-      {int maxId = 0, int freshIdx = 1}) async {
+  Future<HotPage> getHotTimeline(
+    WbChannel channel, {
+    int maxId = 0,
+    int freshIdx = 1,
+  }) async {
     if (failFeed) throw const WeiyueException('网络错误：连接超时');
     return HotPage(statuses: feedItems, maxId: 0, freshIdx: freshIdx);
   }
 
   @override
   Future<({HotWord? gov, List<HotWord> words})> getHotSearch() async => (
-        gov: const HotWord(word: '#置顶话题#', num: 99999, label: '热'),
-        words: const [
-          HotWord(word: '热搜第一条', num: 11459803, realpos: 1, label: '爆'),
-          HotWord(word: '热搜第二条', num: 2175539, realpos: 2, label: ''),
-        ],
-      );
+    gov: const HotWord(word: '#置顶话题#', num: 99999, label: '热'),
+    words: const [
+      HotWord(word: '热搜第一条', num: 11459803, realpos: 1, label: '爆'),
+      HotWord(word: '热搜第二条', num: 2175539, realpos: 2, label: ''),
+    ],
+  );
 
   @override
   Future<List<BandItem>> getBand(String segment) async => const [
-        BandItem(word: '娱乐热词一', num: 1233572, realpos: 1, category: '剧集'),
-      ];
+    BandItem(word: '娱乐热词一', num: 1233572, realpos: 1, category: '剧集'),
+  ];
 
   @override
   Future<WbStatus> getStatus(String id) async =>
@@ -165,33 +219,32 @@ class FakeWeiyueService extends WeiyueService {
 
   @override
   Future<({List<WbComment> comments, int total, int maxId})> getComments(
-          String id,
-          {required String authorUid,
-          int maxId = 0}) async =>
-      (
-        comments: [
-          WbComment(
-            id: 'c1',
-            user: makeStatus().user,
-            text: '这是一条热评',
-            createdAtRaw: 'Mon Oct 26 13:15:08 +0800 2026',
-            source: '来自 湖南',
-            likeCount: 12,
-          ),
-        ],
-        total: 122,
-        maxId: 0,
-      );
+    String id, {
+    required String authorUid,
+    int maxId = 0,
+  }) async => (
+    comments: [
+      WbComment(
+        id: 'c1',
+        user: makeStatus().user,
+        text: '这是一条热评',
+        createdAtRaw: 'Mon Oct 26 13:15:08 +0800 2026',
+        source: '来自 湖南',
+        likeCount: 12,
+      ),
+    ],
+    total: 122,
+    maxId: 0,
+  );
 
   @override
-  Future<({List<WbAttitude> items, int total})> getAttitudes(String id,
-          {int page = 1}) async =>
-      (
-        items: [
-          WbAttitude(id: 'a1', user: makeStatus().user, createdAtRaw: '刚刚'),
-        ],
-        total: 881,
-      );
+  Future<({List<WbAttitude> items, int total})> getAttitudes(
+    String id, {
+    int page = 1,
+  }) async => (
+    items: [WbAttitude(id: 'a1', user: makeStatus().user, createdAtRaw: '刚刚')],
+    total: 881,
+  );
 
   @override
   Future<List<WbStatus>> getRelatedVideos(String mid, {int page = 1}) async =>
@@ -199,17 +252,17 @@ class FakeWeiyueService extends WeiyueService {
 
   @override
   Future<WbUser> getProfileInfo(String uid) async => WbUser(
-        id: int.tryParse(uid) ?? 42,
-        screenName: '测试博主',
-        avatar: 'https://example.com/avatar.jpg',
-        verified: true,
-        verifiedType: 0,
-        description: '简介一句话',
-        followersCount: 12345,
-        friendsCount: 100,
-        statusesCount: 999,
-        coverImagePhone: 'https://example.com/cover.jpg',
-      );
+    id: int.tryParse(uid) ?? 42,
+    screenName: '测试博主',
+    avatar: 'https://example.com/avatar.jpg',
+    verified: true,
+    verifiedType: 0,
+    description: '简介一句话',
+    followersCount: 12345,
+    friendsCount: 100,
+    statusesCount: 999,
+    coverImagePhone: 'https://example.com/cover.jpg',
+  );
 
   @override
   Future<Map<String, dynamic>> getProfileDetail(String uid) async => const {};
@@ -217,17 +270,20 @@ class FakeWeiyueService extends WeiyueService {
   @override
   Future<ContainerPage> getUserStatuses(String uid, {int page = 1}) async =>
       ContainerPage(
-          statuses: page == 1 ? [makeStatus(id: 'u1', text: '主页微博一')] : [],
-          total: 999,
-          nextPage: page + 1);
+        statuses: page == 1 ? [makeStatus(id: 'u1', text: '主页微博一')] : [],
+        total: 999,
+        nextPage: page + 1,
+      );
 
   @override
   Future<ContainerPage> getUserVideos(String uid, {int page = 1}) async =>
       ContainerPage(
-          statuses:
-              page == 1 ? [makeStatus(id: 'v1', text: '主页视频一', video: true)] : [],
-          total: 10,
-          nextPage: page + 1);
+        statuses: page == 1
+            ? [makeStatus(id: 'v1', text: '主页视频一', video: true)]
+            : [],
+        total: 10,
+        nextPage: page + 1,
+      );
 
   @override
   Future<List<WbStatus>> getAlbumStatuses(String uid, {int limit = 9}) async =>
@@ -235,8 +291,8 @@ class FakeWeiyueService extends WeiyueService {
 
   @override
   Future<List<WbPlaylist>> getVideoTab(String uid) async => const [
-        WbPlaylist(id: 'p1', name: '测试合集', itemCount: 36),
-      ];
+    WbPlaylist(id: 'p1', name: '测试合集', itemCount: 36),
+  ];
 
   @override
   Future<SearchSuggest> getSearchSuggest(String q) async =>
@@ -245,35 +301,35 @@ class FakeWeiyueService extends WeiyueService {
   @override
   Future<ContainerPage> getTopicStatuses(String topic, {int page = 1}) async =>
       ContainerPage(
-          statuses:
-              page == 1 ? [makeStatus(id: 't1', text: '话题帖子一')] : const [],
-          total: 100,
-          nextPage: page + 1);
+        statuses: page == 1 ? [makeStatus(id: 't1', text: '话题帖子一')] : const [],
+        total: 100,
+        nextPage: page + 1,
+      );
 
   @override
   Future<ContainerPage> getUserFeatured(String uid, {int page = 1}) async =>
       ContainerPage(
-          statuses:
-              page == 1 ? [makeStatus(id: 'f1', text: '精选帖子一')] : const [],
-          total: 100,
-          nextPage: page + 1);
+        statuses: page == 1 ? [makeStatus(id: 'f1', text: '精选帖子一')] : const [],
+        total: 100,
+        nextPage: page + 1,
+      );
 
   @override
   Future<ContainerPage> getUserArticles(String uid, {int page = 1}) async =>
       ContainerPage(
-          statuses:
-              page == 1 ? [makeStatus(id: 'a1', text: '文章帖子一')] : const [],
-          total: 5,
-          nextPage: page + 1);
+        statuses: page == 1 ? [makeStatus(id: 'a1', text: '文章帖子一')] : const [],
+        total: 5,
+        nextPage: page + 1,
+      );
 
   @override
   Future<({List<WbStatus> statuses, int nextCursor})> getVideoAlbum(
-          String playlistId,
-          {int cursor = 0}) async =>
-      (
-        statuses: [makeStatus(id: 'e1', text: '合集单集一', video: true)],
-        nextCursor: -1,
-      );
+    String playlistId, {
+    int cursor = 0,
+  }) async => (
+    statuses: [makeStatus(id: 'e1', text: '合集单集一', video: true)],
+    nextCursor: -1,
+  );
 
   @override
   Future<List<WbAlbum>> getAlbums(String uid) async => const [];
@@ -283,6 +339,38 @@ class FakeWeiyueService extends WeiyueService {
 
   @override
   Future<String?> getLiveStreamUrl(String liveId) async => null;
+
+  @override
+  Future<({WbUser? user, bool pcUnlocked, bool mUnlocked})>
+  probeSession() async => (user: null, pcUnlocked: false, mUnlocked: false);
+
+  @override
+  Future<({List<WbStatus> statuses, String sinceId})> getFriendsTimeline({
+    String sinceId = '0',
+    int count = 20,
+  }) async => (
+    statuses: sinceId == '0'
+        ? [makeStatus(id: 'fr1', text: '关注流第一条')]
+        : const <WbStatus>[],
+    sinceId: '',
+  );
+
+  @override
+  Future<({List<WbStatus> items, int total, int maxPage})> getReposts(
+    String id, {
+    int page = 1,
+  }) async =>
+      (items: [makeStatus(id: 'rp1', text: '转发内容一')], total: 1, maxPage: 1);
+
+  @override
+  Future<({List<WbStatus> items, int total})> getFavorites({
+    int page = 1,
+  }) async => (
+    items: page == 1
+        ? [makeStatus(id: 'fv1', text: '收藏的帖子一')]
+        : const <WbStatus>[],
+    total: 1,
+  );
 
   @override
   Future<Map<String, String>> getEmoticonMap() async => const {};
@@ -329,19 +417,26 @@ Widget wrapWithProviders(
   FakeWeiyueService? weibo,
   FakeVisitorService? visitor,
   SettingsService? settings,
+  SessionService? session,
 }) {
   final wb = weibo ?? FakeWeiyueService();
   final vs = visitor ?? FakeVisitorService();
   return MultiProvider(
     providers: [
       ChangeNotifierProvider<VisitorService>.value(value: vs),
+      ChangeNotifierProvider<SessionService>.value(
+        value: session ?? FakeSessionService(),
+      ),
       Provider<WeiyueService>.value(value: wb),
       ChangeNotifierProvider<SettingsService>(
-          create: (_) => settings ?? SettingsService()),
+        create: (_) => settings ?? SettingsService(),
+      ),
     ],
     child: MaterialApp(
       theme: buildTheme(
-          brightness: Brightness.light, seedColor: const Color(0xFFE6162D)),
+        brightness: Brightness.light,
+        seedColor: const Color(0xFFE6162D),
+      ),
       home: child,
     ),
   );

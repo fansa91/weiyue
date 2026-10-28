@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/emoticons.dart';
 import '../models/models.dart';
+import 'session_service.dart';
 import 'visitor_service.dart';
 
 class WeiyueException implements Exception {
@@ -22,53 +23,117 @@ Map<String, dynamic> _asMap(dynamic v) {
 
 List<dynamic> _asList(dynamic v) => v is List ? v : const [];
 
+int _intOf(dynamic v) {
+  if (v is num) return v.toInt();
+  if (v is String) return int.tryParse(v.replaceAll(',', '')) ?? 0;
+  return 0;
+}
+
 /// 微博双栈只读接口（依据 WEIBO_API.md 实测结论）。
 /// PC 栈管热门/详情/资料/视频，m 栈管搜索/用户时间线/评论/点赞，两栈混用。
+/// 身份优先级：有登录会话 Cookie 用登录态，否则走访客流程；
+/// 登录态被服务端明确拒绝时标记过期并回退访客态完成当前请求。
 class WeiyueService {
   final VisitorService visitor;
+
+  /// 登录会话（WebView 收割的 Cookie）；未注入时为空会话（恒走访客态）。
+  final SessionService session;
 
   late final Dio _pc;
   late final Dio _m;
 
   /// [pcDio]/[mDio] 可注入（测试用假 adapter）。
-  WeiyueService(this.visitor, {Dio? pcDio, Dio? mDio}) {
+  WeiyueService(this.visitor, {Dio? pcDio, Dio? mDio, SessionService? session})
+    : session = session ?? SessionService() {
     _pc = pcDio ?? _makeDio();
     _m = mDio ?? _makeDio();
   }
 
-  static Dio _makeDio() => Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 15),
-        receiveTimeout: const Duration(seconds: 30),
-        followRedirects: false,
-        // 302/403 要自己判断（访客失效信号），不让 dio 抛错
-        validateStatus: (s) => s != null && s < 500,
-      ));
+  static Dio _makeDio() => Dio(
+    BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 30),
+      followRedirects: false,
+      // 302/403 要自己判断（访客失效信号），不让 dio 抛错
+      validateStatus: (s) => s != null && s < 500,
+    ),
+  );
 
   static const _pcBase = 'https://weibo.com';
   static const _mBase = 'https://m.weibo.cn';
 
-  /// 通用 GET：自动带访客 Cookie；遇 302 / ok:-100 / 403 时重换访客重试一次。
+  /// 服务端「未登录」信号：ok:-100、403、跳登录/passport 的 30x、
+  /// 或 HTTP 200 回登录页 HTML。访客失效与登录过期共用这套判定，
+  /// 由调用方按当前身份决定刷新访客还是标记过期回退。
+  static bool _notLoggedInSignal(
+    int status,
+    Map<String, dynamic>? json,
+    String location,
+    String rawBody,
+  ) {
+    if (json != null && json['ok'] == -100) return true;
+    if (status == 403) return true;
+    if (status == 301 || status == 302) {
+      if (location.isEmpty) return true;
+      final loc = location.toLowerCase();
+      return loc.contains('passport') ||
+          loc.contains('login') ||
+          loc.contains('visitor') ||
+          loc.contains('sso');
+    }
+    if (json == null && rawBody.contains('sso/signin')) return true;
+    return false;
+  }
+
+  /// 决定本次请求用哪份 Cookie：登录会话优先；[sessionOnly] 时
+  /// 只许登录态（探活用，不回退访客，避免把访客结果误判成登录解锁）。
+  /// [retried] 表示已是回退重试，强制走访客，防止循环。
+  Future<({String cookie, bool useSession})> _cookieFor(
+    WbStack stack, {
+    bool sessionOnly = false,
+    bool retried = false,
+  }) async {
+    if (session.hasUsableCookie(stack) && (sessionOnly || !retried)) {
+      return (cookie: session.cookieHeaderFor(stack)!, useSession: true);
+    }
+    if (sessionOnly) throw const WeiyueException('无登录会话');
+    final identity = await visitor.ensure(stack);
+    return (cookie: identity.cookie, useSession: false);
+  }
+
+  /// 通用 GET：身份处理见类注释；失效时只重试一次。
+  /// [sessionOnly]=true 时不回退访客（登录探活专用）。
   Future<Map<String, dynamic>> _get(
     WbStack stack,
     String url, {
     Map<String, dynamic>? query,
     String? referer,
     bool retried = false,
+    bool sessionOnly = false,
   }) async {
-    final identity = await visitor.ensure(stack);
+    final picked = await _cookieFor(
+      stack,
+      sessionOnly: sessionOnly,
+      retried: retried,
+    );
     final dio = stack == WbStack.pc ? _pc : _m;
     final Response<dynamic> resp;
     try {
       resp = await dio.get<dynamic>(
         url,
         queryParameters: query,
-        options: Options(headers: {
-          'User-Agent': visitor.uaOf(stack),
-          'Referer': referer ??
-              (stack == WbStack.pc ? 'https://weibo.com/' : 'https://m.weibo.cn/'),
-          'X-Requested-With': 'XMLHttpRequest',
-          'Cookie': identity.cookie,
-        }),
+        options: Options(
+          headers: {
+            'User-Agent': visitor.uaOf(stack),
+            'Referer':
+                referer ??
+                (stack == WbStack.pc
+                    ? 'https://weibo.com/'
+                    : 'https://m.weibo.cn/'),
+            'X-Requested-With': 'XMLHttpRequest',
+            'Cookie': picked.cookie,
+          },
+        ),
       );
     } on DioException catch (e) {
       throw WeiyueException('网络错误：${e.message ?? e.type.name}');
@@ -79,15 +144,22 @@ class WeiyueService {
     if (data is Map) {
       json = _asMap(data);
     }
-    final visitorExpired = status == 301 ||
-        status == 302 ||
-        status == 403 ||
-        (json != null && json["ok"] == -100);
-    if (visitorExpired && !retried) {
-      await visitor.refresh(stack);
-      return _get(stack, url, query: query, referer: referer, retried: true);
-    }
-    if (visitorExpired) {
+    final location = resp.headers.value('location') ?? '';
+    final rawBody = data is String ? data : '';
+    final notLoggedIn = _notLoggedInSignal(status, json, location, rawBody);
+    if (notLoggedIn) {
+      if (sessionOnly) {
+        throw const WeiyueException('登录态未生效（服务端未认）');
+      }
+      if (picked.useSession) {
+        // 登录 Cookie 被拒：标记过期，回退访客态把当前请求做完
+        session.markExpired();
+        return _get(stack, url, query: query, referer: referer, retried: true);
+      }
+      if (!retried) {
+        await visitor.refresh(stack);
+        return _get(stack, url, query: query, referer: referer, retried: true);
+      }
       throw const WeiyueException('访客身份失效，重试后仍被拦截');
     }
     if (json == null) {
@@ -96,7 +168,7 @@ class WeiyueService {
     return json;
   }
 
-  /// 纯文本 GET（同 _get 的访客处理）：给返回 JSONP 的接口用
+  /// 纯文本 GET（同 _get 的身份处理）：给返回 JSONP 的接口用
   /// （m container/getItem 的响应被括号包裹，dio 的 JSON 解码接不住）。
   Future<String> _getRaw(
     WbStack stack,
@@ -105,7 +177,7 @@ class WeiyueService {
     String? referer,
     bool retried = false,
   }) async {
-    final identity = await visitor.ensure(stack);
+    final picked = await _cookieFor(stack, retried: retried);
     final dio = stack == WbStack.pc ? _pc : _m;
     final Response<dynamic> resp;
     try {
@@ -116,12 +188,13 @@ class WeiyueService {
           responseType: ResponseType.plain,
           headers: {
             'User-Agent': visitor.uaOf(stack),
-            'Referer': referer ??
+            'Referer':
+                referer ??
                 (stack == WbStack.pc
                     ? 'https://weibo.com/'
                     : 'https://m.weibo.cn/'),
             'X-Requested-With': 'XMLHttpRequest',
-            'Cookie': identity.cookie,
+            'Cookie': picked.cookie,
           },
         ),
       );
@@ -130,13 +203,29 @@ class WeiyueService {
     }
     final status = resp.statusCode ?? 0;
     final body = resp.data?.toString() ?? '';
-    final visitorExpired = status == 301 || status == 302 || status == 403;
-    if (visitorExpired && !retried) {
-      await visitor.refresh(stack);
-      return _getRaw(stack, url,
-          query: query, referer: referer, retried: true);
-    }
-    if (visitorExpired) {
+    final location = resp.headers.value('location') ?? '';
+    final notLoggedIn = _notLoggedInSignal(status, null, location, body);
+    if (notLoggedIn) {
+      if (picked.useSession) {
+        session.markExpired();
+        return _getRaw(
+          stack,
+          url,
+          query: query,
+          referer: referer,
+          retried: true,
+        );
+      }
+      if (!retried) {
+        await visitor.refresh(stack);
+        return _getRaw(
+          stack,
+          url,
+          query: query,
+          referer: referer,
+          retried: true,
+        );
+      }
       throw const WeiyueException('访客身份失效，重试后仍被拦截');
     }
     return body;
@@ -158,32 +247,95 @@ class WeiyueService {
   static const List<WbChannel> fallbackChannels = [
     WbChannel(gid: '102803', title: '热门', containerid: '102803'),
     WbChannel(gid: '1028032222', title: '同城', containerid: '102803_2222'),
-    WbChannel(gid: '102803600343', title: '实时', containerid: '102803_ctg1_600343_-_ctg1_600343'),
-    WbChannel(gid: '102803600583', title: 'S16', containerid: '102803_ctg1_600583_-_ctg1_600583'),
-    WbChannel(gid: '102803600169', title: '榜单', containerid: '102803_ctg1_600169_-_ctg1_600169'),
-    WbChannel(gid: '1028034288', title: '明星', containerid: '102803_ctg1_4288_-_ctg1_4288'),
-    WbChannel(gid: '1028034388', title: '搞笑', containerid: '102803_ctg1_4388_-_ctg1_4388'),
-    WbChannel(gid: '1028031988', title: '情感', containerid: '102803_ctg1_1988_-_ctg1_1988'),
-    WbChannel(gid: '102803600410', title: '短剧', containerid: '102803_ctg1_600410_-_ctg1_600410'),
-    WbChannel(gid: '102803600311', title: '印像', containerid: '102803_ctg1_600311_-_ctg1_600311'),
-    WbChannel(gid: '102803600195', title: '周末', containerid: '102803_ctg1_600195_-_ctg1_600195'),
-    WbChannel(gid: '1028033288', title: '电影', containerid: '102803_ctg1_3288_-_ctg1_3288'),
-    WbChannel(gid: '1028034188', title: '社会', containerid: '102803_ctg1_4188_-_ctg1_4188'),
-    WbChannel(gid: '1028032488', title: '电视剧', containerid: '102803_ctg1_2488_-_ctg1_2488'),
-    WbChannel(gid: '1028032688', title: '美食', containerid: '102803_ctg1_2688_-_ctg1_2688'),
-    WbChannel(gid: '1028036288', title: '国际', containerid: '102803_ctg1_6288_-_ctg1_6288'),
-    WbChannel(gid: '102803600155', title: '深度', containerid: '102803_ctg1_600155_-_ctg1_600155'),
+    WbChannel(
+      gid: '102803600343',
+      title: '实时',
+      containerid: '102803_ctg1_600343_-_ctg1_600343',
+    ),
+    WbChannel(
+      gid: '102803600583',
+      title: 'S16',
+      containerid: '102803_ctg1_600583_-_ctg1_600583',
+    ),
+    WbChannel(
+      gid: '102803600169',
+      title: '榜单',
+      containerid: '102803_ctg1_600169_-_ctg1_600169',
+    ),
+    WbChannel(
+      gid: '1028034288',
+      title: '明星',
+      containerid: '102803_ctg1_4288_-_ctg1_4288',
+    ),
+    WbChannel(
+      gid: '1028034388',
+      title: '搞笑',
+      containerid: '102803_ctg1_4388_-_ctg1_4388',
+    ),
+    WbChannel(
+      gid: '1028031988',
+      title: '情感',
+      containerid: '102803_ctg1_1988_-_ctg1_1988',
+    ),
+    WbChannel(
+      gid: '102803600410',
+      title: '短剧',
+      containerid: '102803_ctg1_600410_-_ctg1_600410',
+    ),
+    WbChannel(
+      gid: '102803600311',
+      title: '印像',
+      containerid: '102803_ctg1_600311_-_ctg1_600311',
+    ),
+    WbChannel(
+      gid: '102803600195',
+      title: '周末',
+      containerid: '102803_ctg1_600195_-_ctg1_600195',
+    ),
+    WbChannel(
+      gid: '1028033288',
+      title: '电影',
+      containerid: '102803_ctg1_3288_-_ctg1_3288',
+    ),
+    WbChannel(
+      gid: '1028034188',
+      title: '社会',
+      containerid: '102803_ctg1_4188_-_ctg1_4188',
+    ),
+    WbChannel(
+      gid: '1028032488',
+      title: '电视剧',
+      containerid: '102803_ctg1_2488_-_ctg1_2488',
+    ),
+    WbChannel(
+      gid: '1028032688',
+      title: '美食',
+      containerid: '102803_ctg1_2688_-_ctg1_2688',
+    ),
+    WbChannel(
+      gid: '1028036288',
+      title: '国际',
+      containerid: '102803_ctg1_6288_-_ctg1_6288',
+    ),
+    WbChannel(
+      gid: '102803600155',
+      title: '深度',
+      containerid: '102803_ctg1_600155_-_ctg1_600155',
+    ),
   ];
 
   ({List<WbChannel> mine, List<WbChannel> recommended})? _channelsCache;
 
   Future<({List<WbChannel> mine, List<WbChannel> recommended})>
-      getChannels() async {
+  getChannels() async {
     final cached = _channelsCache;
     if (cached != null) return cached;
     try {
-      final json = await _get(WbStack.pc, '$_pcBase/ajax/feed/allGroups',
-          query: {'is_new_segment': 1, 'fetch_hot': 1});
+      final json = await _get(
+        WbStack.pc,
+        '$_pcBase/ajax/feed/allGroups',
+        query: {'is_new_segment': 1, 'fetch_hot': 1},
+      );
       List<WbChannel> pick(String title) {
         for (final g in _asList(json['groups'])) {
           final gm = _asMap(g);
@@ -200,14 +352,15 @@ class WeiyueService {
       final mine = pick('我的频道');
       final recommended = pick('频道推荐');
       if (mine.isNotEmpty) {
-        return _channelsCache =
-            (mine: mine, recommended: recommended);
+        return _channelsCache = (mine: mine, recommended: recommended);
       }
     } catch (_) {
       // 落回内置常量
     }
-    return _channelsCache =
-        (mine: fallbackChannels, recommended: const <WbChannel>[]);
+    return _channelsCache = (
+      mine: fallbackChannels,
+      recommended: const <WbChannel>[],
+    );
   }
 
   /// 按名找分类（视频页签用）：先查缓存/接口结果，再查内置表。
@@ -249,7 +402,9 @@ class WeiyueService {
     final maxIdRaw = json['max_id'];
     return HotPage(
       statuses: statuses,
-      maxId: maxIdRaw is num ? maxIdRaw.toInt() : int.tryParse('$maxIdRaw') ?? 0,
+      maxId: maxIdRaw is num
+          ? maxIdRaw.toInt()
+          : int.tryParse('$maxIdRaw') ?? 0,
       freshIdx: freshIdx,
     );
   }
@@ -272,8 +427,7 @@ class WeiyueService {
 
   /// band 分类词榜：segment ∈ entertainment/life/social/technology/sport/acg
   Future<List<BandItem>> getBand(String segment) async {
-    final json =
-        await _get(WbStack.pc, '$_pcBase/ajax/statuses/$segment');
+    final json = await _get(WbStack.pc, '$_pcBase/ajax/statuses/$segment');
     final data = _asMap(json['data']);
     return _asList(data['band_list'])
         .map((e) => BandItem.fromJson(_asMap(e)))
@@ -284,15 +438,22 @@ class WeiyueService {
   // ---------------- 详情 / 评论 / 点赞 ----------------
 
   Future<WbStatus> getStatus(String id) async {
-    final json = await _get(WbStack.pc, '$_pcBase/ajax/statuses/show',
-        query: {'id': id}, referer: 'https://weibo.com/detail/$id');
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/show',
+      query: {'id': id},
+      referer: 'https://weibo.com/detail/$id',
+    );
     return WbStatus.fromJson(json);
   }
 
   /// 长文全文（纯文本）；失败返回空串
   Future<String> getLongText(String id) async {
-    final json = await _get(WbStack.pc, '$_pcBase/ajax/statuses/longtext',
-        query: {'id': id});
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/longtext',
+      query: {'id': id},
+    );
     final data = _asMap(json['data']);
     final content = data['longTextContent']?.toString() ?? '';
     return cleanWbText(content);
@@ -336,13 +497,16 @@ class WeiyueService {
     String id, {
     int page = 1,
   }) async {
-    final json = await _get(WbStack.m, '$_mBase/api/attitudes/show',
-        query: {'id': id, 'page': page},
-        referer: 'https://m.weibo.cn/detail/$id');
+    final json = await _get(
+      WbStack.m,
+      '$_mBase/api/attitudes/show',
+      query: {'id': id, 'page': page},
+      referer: 'https://m.weibo.cn/detail/$id',
+    );
     final data = _asMap(json['data']);
-    final items = _asList(data['data'])
-        .map((e) => WbAttitude.fromJson(_asMap(e)))
-        .toList();
+    final items = _asList(
+      data['data'],
+    ).map((e) => WbAttitude.fromJson(_asMap(e))).toList();
     final totalRaw = data['total_number'];
     return (
       items: items,
@@ -367,24 +531,38 @@ class WeiyueService {
   // ---------------- 用户 ----------------
 
   Future<WbUser> getProfileInfo(String uid) async {
-    final json = await _get(WbStack.pc, '$_pcBase/ajax/profile/info',
-        query: {'uid': uid}, referer: 'https://weibo.com/u/$uid');
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/profile/info',
+      query: {'uid': uid},
+      referer: 'https://weibo.com/u/$uid',
+    );
     final data = _asMap(json['data']);
     return WbUser.fromJson(_asMap(data['user']));
   }
 
   /// profile/detail 原始 data（生日/注册时间/阳光信用/标签等），页面自行取行
   Future<Map<String, dynamic>> getProfileDetail(String uid) async {
-    final json = await _get(WbStack.pc, '$_pcBase/ajax/profile/detail',
-        query: {'uid': uid}, referer: 'https://weibo.com/u/$uid');
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/profile/detail',
+      query: {'uid': uid},
+      referer: 'https://weibo.com/u/$uid',
+    );
     return _asMap(json['data']);
   }
 
   /// m 容器泛型请求，返回 data
-  Future<Map<String, dynamic>> _container(Map<String, dynamic> query,
-      {String? referer}) async {
-    final json = await _get(WbStack.m, '$_mBase/api/container/getIndex',
-        query: query, referer: referer);
+  Future<Map<String, dynamic>> _container(
+    Map<String, dynamic> query, {
+    String? referer,
+  }) async {
+    final json = await _get(
+      WbStack.m,
+      '$_mBase/api/container/getIndex',
+      query: query,
+      referer: referer,
+    );
     return _asMap(json['data']);
   }
 
@@ -417,25 +595,33 @@ class WeiyueService {
   }
 
   Future<ContainerPage> getUserStatuses(String uid, {int page = 1}) async {
-    final data = await _container(
-      {'type': 'uid', 'value': uid, 'containerid': '107603$uid', 'page': page},
-      referer: 'https://m.weibo.cn/u/$uid',
-    );
+    final data = await _container({
+      'type': 'uid',
+      'value': uid,
+      'containerid': '107603$uid',
+      'page': page,
+    }, referer: 'https://m.weibo.cn/u/$uid');
     return _parseContainer(data);
   }
 
   Future<ContainerPage> getUserVideos(String uid, {int page = 1}) async {
-    final data = await _container(
-      {'type': 'uid', 'value': uid, 'containerid': '231567$uid', 'page': page},
-      referer: 'https://m.weibo.cn/u/$uid',
-    );
+    final data = await _container({
+      'type': 'uid',
+      'value': uid,
+      'containerid': '231567$uid',
+      'page': page,
+    }, referer: 'https://m.weibo.cn/u/$uid');
     return _parseContainer(data);
   }
 
   /// 相册：getImageWall 只给 mid 列表，逐条 show 取图（取前 limit 条）。
   Future<List<WbStatus>> getAlbumStatuses(String uid, {int limit = 9}) async {
-    final json = await _get(WbStack.pc, '$_pcBase/ajax/profile/getImageWall',
-        query: {'uid': uid}, referer: 'https://weibo.com/u/$uid');
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/profile/getImageWall',
+      query: {'uid': uid},
+      referer: 'https://weibo.com/u/$uid',
+    );
     final data = _asMap(json['data']);
     final mids = <String>[];
     for (final item in _asList(data['list'])) {
@@ -457,8 +643,12 @@ class WeiyueService {
   }
 
   Future<List<WbPlaylist>> getVideoTab(String uid) async {
-    final json = await _get(WbStack.pc, '$_pcBase/ajax/profile/getVideoTab',
-        query: {'uid': uid}, referer: 'https://weibo.com/u/$uid');
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/profile/getVideoTab',
+      query: {'uid': uid},
+      referer: 'https://weibo.com/u/$uid',
+    );
     final data = _asMap(json['data']);
     return _asList(data['playlists'])
         .map((e) => WbPlaylist.fromJson(_asMap(e)))
@@ -472,9 +662,11 @@ class WeiyueService {
     int cursor = 0,
   }) async {
     final json = await _get(
-        WbStack.pc, '$_pcBase/ajax/profile/getprofilevideolist',
-        query: {'uid': uid, 'cursor': cursor},
-        referer: 'https://weibo.com/u/$uid');
+      WbStack.pc,
+      '$_pcBase/ajax/profile/getprofilevideolist',
+      query: {'uid': uid, 'cursor': cursor},
+      referer: 'https://weibo.com/u/$uid',
+    );
     final data = _asMap(json['data']);
     final statuses = <WbStatus>[];
     for (final item in _asList(data['list'])) {
@@ -496,9 +688,12 @@ class WeiyueService {
     String uid, {
     int cursor = 0,
   }) async {
-    final json = await _get(WbStack.pc, '$_pcBase/ajax/profile/gettinyvideo',
-        query: {'uid': uid, 'cursor': cursor, 'count': 20},
-        referer: 'https://weibo.com/u/$uid');
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/profile/gettinyvideo',
+      query: {'uid': uid, 'cursor': cursor, 'count': 20},
+      referer: 'https://weibo.com/u/$uid',
+    );
     final data = _asMap(json['data']);
     final statuses = _asList(data['list'])
         .map((e) => WbStatus.fromJson(_asMap(e)))
@@ -518,14 +713,11 @@ class WeiyueService {
   /// - card_type=11 分组卡：card_group 内 card_type=10 带 user 对象=用户卡，
   ///   card_type=9 带 mblog=微博卡，card_type=6 是「更多热门微博」链接卡（忽略）
   Future<SearchResult> search(String keyword, {int page = 1}) async {
-    final data = await _container(
-      {
-        'containerid': '100103type=1&q=${Uri.encodeComponent(keyword)}&t=0',
-        'page_type': 'searchall',
-        'page': page,
-      },
-      referer: 'https://m.weibo.cn/search',
-    );
+    final data = await _container({
+      'containerid': '100103type=1&q=${Uri.encodeComponent(keyword)}&t=0',
+      'page_type': 'searchall',
+      'page': page,
+    }, referer: 'https://m.weibo.cn/search');
     final users = <WbUser>[];
     final statuses = <WbStatus>[];
     final seenUsers = <int>{};
@@ -560,8 +752,11 @@ class WeiyueService {
 
   /// PC /ajax/side/search：hotquery 联想词 + users 推荐用户（访客实测可读）。
   Future<SearchSuggest> getSearchSuggest(String q) async {
-    final json = await _get(WbStack.pc, '$_pcBase/ajax/side/search',
-        query: {'q': q, 'page': 1});
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/side/search',
+      query: {'q': q, 'page': 1},
+    );
     final data = _asMap(json['data']);
     final queries = <String>[];
     for (final e in _asList(data['hotquery'])) {
@@ -582,14 +777,10 @@ class WeiyueService {
   /// m 话题容器 231522type=1&q=#话题#（访客实测可读，cardlistInfo.page 翻页，
   /// 与用户时间线同一套容器翻页规则）。
   Future<ContainerPage> getTopicStatuses(String topic, {int page = 1}) async {
-    final data = await _container(
-      {
-        'containerid':
-            '231522type=1&q=${Uri.encodeComponent('#$topic#')}',
-        'page': page,
-      },
-      referer: 'https://m.weibo.cn/search',
-    );
+    final data = await _container({
+      'containerid': '231522type=1&q=${Uri.encodeComponent('#$topic#')}',
+      'page': page,
+    }, referer: 'https://m.weibo.cn/search');
     return _parseContainer(data);
   }
 
@@ -602,10 +793,12 @@ class WeiyueService {
   Future<ContainerPage> getUserFeatured(String uid, {int page = 1}) async {
     var itemid = _featuredItemIds[uid];
     if (itemid == null) {
-      final data = await _container(
-        {'type': 'uid', 'value': uid, 'containerid': '230283$uid', 'page': 1},
-        referer: 'https://m.weibo.cn/u/$uid',
-      );
+      final data = await _container({
+        'type': 'uid',
+        'value': uid,
+        'containerid': '230283$uid',
+        'page': 1,
+      }, referer: 'https://m.weibo.cn/u/$uid');
       for (final c in _asList(data['cards'])) {
         final cm = _asMap(c);
         final iid = '${cm['itemid'] ?? ''}';
@@ -617,9 +810,12 @@ class WeiyueService {
       if (itemid == null) return const ContainerPage();
       _featuredItemIds[uid] = itemid;
     }
-    final body = await _getRaw(WbStack.m, '$_mBase/api/container/getItem',
-        query: {'itemid': itemid, 'page': page},
-        referer: 'https://m.weibo.cn/u/$uid');
+    final body = await _getRaw(
+      WbStack.m,
+      '$_mBase/api/container/getItem',
+      query: {'itemid': itemid, 'page': page},
+      referer: 'https://m.weibo.cn/u/$uid',
+    );
     final data = _asMap(_decodeJsonp(body)['data']);
     final statuses = <WbStatus>[];
     final seen = <String>{};
@@ -646,15 +842,12 @@ class WeiyueService {
   /// 文章容器 231912{uid}_-_ordinary：mblog 在 card_type 11 的 card_group 里，
   /// 正文在 mblog.text（HTML），通用解析已处理（访客实测可读）。
   Future<ContainerPage> getUserArticles(String uid, {int page = 1}) async {
-    final data = await _container(
-      {
-        'type': 'uid',
-        'value': uid,
-        'containerid': '231912${uid}_-_ordinary',
-        'page': page,
-      },
-      referer: 'https://m.weibo.cn/u/$uid',
-    );
+    final data = await _container({
+      'type': 'uid',
+      'value': uid,
+      'containerid': '231912${uid}_-_ordinary',
+      'page': page,
+    }, referer: 'https://m.weibo.cn/u/$uid');
     return _parseContainer(data);
   }
 
@@ -684,8 +877,7 @@ class WeiyueService {
       // 落盘缓存损坏则当作无缓存，继续走网络
     }
     try {
-      final json =
-          await _get(WbStack.pc, '$_pcBase/ajax/statuses/config');
+      final json = await _get(WbStack.pc, '$_pcBase/ajax/statuses/config');
       final map = parseEmoticonMap(_asMap(json['data']));
       if (map.isNotEmpty) {
         _emoticonMem = map;
@@ -718,10 +910,7 @@ class WeiyueService {
     final json = await _get(
       WbStack.pc,
       '$_pcBase/ajax/profile/videoalbumdetail',
-      query: {
-        'playlist_id': playlistId,
-        if (cursor != 0) 'cursor': cursor,
-      },
+      query: {'playlist_id': playlistId, if (cursor != 0) 'cursor': cursor},
     );
     final data = _asMap(json['data']);
     final statuses = <WbStatus>[];
@@ -746,8 +935,11 @@ class WeiyueService {
   /// 相册列表（访客实测可读）。getAlbumDetail 实测对访客恒返回空，
   /// 照片走 albumlist 给出的 m 容器（containerid 内嵌 background 参数）。
   Future<List<WbAlbum>> getAlbums(String uid) async {
-    final json = await _get(WbStack.pc, '$_pcBase/ajax/profile/albumlist',
-        query: {'uid': uid});
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/profile/albumlist',
+      query: {'uid': uid},
+    );
     return _asList(json['data'])
         .map((e) => WbAlbum.fromJson(_asMap(e)))
         .where((a) => a.containerid.isNotEmpty)
@@ -767,14 +959,11 @@ class WeiyueService {
         orElse: () => albums.first,
       ),
     );
-    final data = await _container(
-      {
-        'containerid': pick.containerid,
-        'background': 'ffffff',
-        'page': 1,
-      },
-      referer: 'https://m.weibo.cn/u/$uid',
-    );
+    final data = await _container({
+      'containerid': pick.containerid,
+      'background': 'ffffff',
+      'page': 1,
+    }, referer: 'https://m.weibo.cn/u/$uid');
     final groups = <List<WbPic>>[];
     void walk(Map<String, dynamic> card) {
       final picsRaw = _asList(card['pics']);
@@ -782,16 +971,19 @@ class WeiyueService {
         final pics = <WbPic>[];
         for (final p in picsRaw) {
           final pm = _asMap(p);
-          String u(String k) => '${pm[k] ?? ''}'.replaceFirst('http://', 'https://');
+          String u(String k) =>
+              '${pm[k] ?? ''}'.replaceFirst('http://', 'https://');
           final big = u('pic_big');
           final original = u('pic_mw2000');
-          pics.add(WbPic(
-            pid: '${pm['pic_id'] ?? ''}',
-            thumbnail: u('pic_small'),
-            bmiddle: u('pic_middle'),
-            large: big,
-            original: original.isNotEmpty ? original : big,
-          ));
+          pics.add(
+            WbPic(
+              pid: '${pm['pic_id'] ?? ''}',
+              thumbnail: u('pic_small'),
+              bmiddle: u('pic_middle'),
+              large: big,
+              original: original.isNotEmpty ? original : big,
+            ),
+          );
         }
         pics.removeWhere((p) => p.large.isEmpty && p.thumbnail.isEmpty);
         if (pics.isNotEmpty) groups.add(pics);
@@ -860,5 +1052,165 @@ class WeiyueService {
       return node.replaceFirst('http://', 'https://');
     }
     return null;
+  }
+
+  // ---------------- 登录探活 ----------------
+
+  /// 从 setting/getBasicInfo 或 profile/info 的响应里防御式提取当前用户：
+  /// 依次找 data.user / data 本人（带 screen_name）/ 顶层 user。
+  static WbUser? _parseCurrentUser(Map<String, dynamic> json) {
+    final data = _asMap(json['data']);
+    for (final candidate in [
+      _asMap(data['user']),
+      data,
+      _asMap(json['user']),
+    ]) {
+      if (candidate.isEmpty) continue;
+      final u = WbUser.fromJson(candidate);
+      if (u.id > 0 || u.screenName.isNotEmpty) return u;
+    }
+    return null;
+  }
+
+  /// 登录探活（收割 Cookie 后调用）：全部走 sessionOnly 请求，
+  /// 不回退访客——访客能读的接口成功不代表登录解锁。
+  /// - PC 当前用户：先 /ajax/setting/getBasicInfo（设置族，登录态接口），
+  ///   失败再试 /ajax/profile/info 无参；两者都拿不到用户时，
+  ///   用 friendstimeline 不被挡（访客恒 403）作为解锁兜底判据。
+  /// - m 栈：/api/statuses/repostTimeline 访客固定回 ok:-100（文档实测），
+  ///   登录态回任何正常 JSON 即算解锁（用哑 id 探，不取真实数据）。
+  /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
+  Future<({WbUser? user, bool pcUnlocked, bool mUnlocked})>
+  probeSession() async {
+    WbUser? user;
+    var pcOk = false;
+    try {
+      final json = await _get(
+        WbStack.pc,
+        '$_pcBase/ajax/setting/getBasicInfo',
+        sessionOnly: true,
+      );
+      user = _parseCurrentUser(json);
+      pcOk = user != null;
+    } catch (_) {}
+    if (user == null) {
+      try {
+        final json = await _get(
+          WbStack.pc,
+          '$_pcBase/ajax/profile/info',
+          sessionOnly: true,
+        );
+        user = _parseCurrentUser(json);
+        pcOk = user != null;
+      } catch (_) {}
+    }
+    if (!pcOk) {
+      try {
+        await _get(
+          WbStack.pc,
+          '$_pcBase/ajax/feed/friendstimeline',
+          query: {'list_id': 10001, 'refresh': 4, 'since_id': 0, 'count': 3},
+          sessionOnly: true,
+        );
+        pcOk = true;
+      } catch (_) {}
+    }
+    var mOk = false;
+    try {
+      await _get(
+        WbStack.m,
+        '$_mBase/api/statuses/repostTimeline',
+        query: {'id': '0', 'page': 1},
+        sessionOnly: true,
+      );
+      mOk = true;
+    } catch (_) {}
+    return (user: user, pcUnlocked: pcOk, mUnlocked: mOk);
+  }
+
+  // ---------------- 登录态只读解锁 ----------------
+
+  /// 关注流（登录后可用，访客 403）：/ajax/feed/friendstimeline。
+  /// 响应结构未实测登录态，防御解析：statuses 依次找顶层 statuses /
+  /// data.list / data.statuses；游标 since_id 顶层与 data 内都找，
+  /// 原样回传续拉（可能为数字或 JSON 串）。
+  Future<({List<WbStatus> statuses, String sinceId})> getFriendsTimeline({
+    String sinceId = '0',
+    int count = 20,
+  }) async {
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/feed/friendstimeline',
+      query: {
+        'list_id': 10001,
+        'refresh': 4,
+        'since_id': sinceId,
+        'count': count,
+      },
+      referer: 'https://weibo.com/',
+    );
+    final data = _asMap(json['data']);
+    var raw = _asList(json['statuses']);
+    if (raw.isEmpty) raw = _asList(data['list']);
+    if (raw.isEmpty) raw = _asList(data['statuses']);
+    final statuses = raw
+        .map((e) => WbStatus.fromJson(_asMap(e)))
+        .where((s) => s.id.isNotEmpty)
+        .toList();
+    var sid = '${json['since_id'] ?? data['since_id'] ?? ''}';
+    if (sid == 'null') sid = '';
+    return (statuses: statuses, sinceId: sid);
+  }
+
+  /// 转发列表（登录后可用）：/ajax/statuses/repostTimeline。
+  /// 访客固定回 `{data: [], total_number: 0, empty_tip: "…请登录后使用"}`；
+  /// 登录态 data 为帖子对象数组，page/max_page 分页（文档结构）。
+  Future<({List<WbStatus> items, int total, int maxPage})> getReposts(
+    String id, {
+    int page = 1,
+  }) async {
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/repostTimeline',
+      query: {'id': id, 'page': page, 'moduleID': 'feed', 'feature': 0},
+      referer: 'https://weibo.com/detail/$id',
+    );
+    final items = _asList(json['data'])
+        .map((e) => WbStatus.fromJson(_asMap(e)))
+        .where((s) => s.id.isNotEmpty)
+        .toList();
+    return (
+      items: items,
+      total: _intOf(json['total_number']),
+      maxPage: _intOf(json['max_page']),
+    );
+  }
+
+  /// 我的收藏（登录后可用）：/ajax/favorites/all_fav（文档 favorites 族）。
+  /// 登录态结构未实测，防御解析：条目依次找 data.list / 顶层 list，
+  /// 单条若带 status 子对象则解包，否则按帖子对象直接解析。
+  Future<({List<WbStatus> items, int total})> getFavorites({
+    int page = 1,
+  }) async {
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/favorites/all_fav',
+      query: {'page': page},
+    );
+    final data = _asMap(json['data']);
+    var raw = _asList(data['list']);
+    if (raw.isEmpty) raw = _asList(json['list']);
+    final items = <WbStatus>[];
+    for (final e in raw) {
+      final em = _asMap(e);
+      final inner = _asMap(em['status']);
+      final s = WbStatus.fromJson(inner.isNotEmpty ? inner : em);
+      if (s.id.isNotEmpty) items.add(s);
+    }
+    final totalRaw = data['total_number'] ?? json['total_number'];
+    return (
+      items: items,
+      total: totalRaw is num ? totalRaw.toInt() : items.length,
+    );
   }
 }

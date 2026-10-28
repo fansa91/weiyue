@@ -461,6 +461,11 @@ class WbComment {
   final int likeCount;
   final int floorNumber;
 
+  /// 内嵌回复（楼中楼）：buildComments 响应里评论对象自带的 comments 子列表。
+  /// 文档/主包未见独立的楼层分页接口证据，故只展示接口内嵌的这一层，
+  /// 不另接接口（见 WEIBO_API.md 评论节）。
+  final List<WbComment> replies;
+
   const WbComment({
     required this.id,
     this.user,
@@ -469,6 +474,7 @@ class WbComment {
     this.source = '',
     this.likeCount = 0,
     this.floorNumber = 0,
+    this.replies = const [],
   });
 
   factory WbComment.fromJson(Map<String, dynamic> j) {
@@ -481,6 +487,10 @@ class WbComment {
       source: _strOf(j['source']),
       likeCount: _intOf(j['like_count'] ?? j['like_counts']),
       floorNumber: _intOf(j['floor_number']),
+      replies: _listOf(j['comments'])
+          .map((e) => WbComment.fromJson(_mapOf(e)))
+          .where((c) => c.id.isNotEmpty)
+          .toList(),
     );
   }
 }
