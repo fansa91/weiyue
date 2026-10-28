@@ -68,17 +68,19 @@ class SettingsScreen extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('默认视频清晰度'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final q in VideoQualityPref.values)
-              RadioListTile<VideoQualityPref>(
-                title: Text(q.label),
-                value: q,
-                groupValue: settings.videoQuality,
-                onChanged: (_) => Navigator.of(ctx).pop(q),
-              ),
-          ],
+        content: RadioGroup<VideoQualityPref>(
+          groupValue: settings.videoQuality,
+          onChanged: (q) => Navigator.of(ctx).pop(q),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final q in VideoQualityPref.values)
+                RadioListTile<VideoQualityPref>(
+                  title: Text(q.label),
+                  value: q,
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -93,17 +95,19 @@ class SettingsScreen extends StatelessWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('默认图片清晰度'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final q in ImageQualityPref.values)
-              RadioListTile<ImageQualityPref>(
-                title: Text(q.label),
-                value: q,
-                groupValue: settings.imageQuality,
-                onChanged: (_) => Navigator.of(ctx).pop(q),
-              ),
-          ],
+        content: RadioGroup<ImageQualityPref>(
+          groupValue: settings.imageQuality,
+          onChanged: (q) => Navigator.of(ctx).pop(q),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final q in ImageQualityPref.values)
+                RadioListTile<ImageQualityPref>(
+                  title: Text(q.label),
+                  value: q,
+                ),
+            ],
+          ),
         ),
       ),
     );
