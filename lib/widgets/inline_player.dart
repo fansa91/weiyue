@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -10,6 +9,7 @@ import 'package:provider/provider.dart';
 
 import '../core/ime.dart';
 import '../core/utils.dart';
+import 'network_image.dart';
 import '../models/models.dart';
 import '../services/settings_service.dart';
 
@@ -420,10 +420,10 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
       fit: StackFit.expand,
       children: [
         if (video.cover.isNotEmpty)
-          CachedNetworkImage(
-            imageUrl: video.cover,
+          NetImage(
+            url: video.cover,
             fit: BoxFit.cover,
-            errorWidget: (_, _, _) => Container(color: Colors.black87),
+            errorBuilder: (_) => Container(color: Colors.black87),
           )
         else
           Container(color: Colors.black87),

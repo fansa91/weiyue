@@ -1,4 +1,4 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:extended_image_plus/extended_image_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_image_mock/network_image_mock.dart';
@@ -143,7 +143,7 @@ void main() {
       await tester.pumpWidget(
           wrapWithProviders(const WbRichText('好难过[泪]啊')));
       await _settle(tester);
-      expect(find.byType(CachedNetworkImage), findsOneWidget);
+      expect(find.byType(ExtendedImage), findsOneWidget);
     });
   });
 
@@ -153,7 +153,7 @@ void main() {
       await tester.pumpWidget(
           wrapWithProviders(const WbRichText('好难过[泪]啊')));
       await _settle(tester);
-      expect(find.byType(CachedNetworkImage), findsNothing);
+      expect(find.byType(ExtendedImage), findsNothing);
       expect(find.textContaining('[泪]', findRichText: true), findsOneWidget);
     });
   });

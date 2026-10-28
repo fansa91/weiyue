@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_image_mock/network_image_mock.dart';
-import 'package:photo_view/photo_view.dart';
+import 'package:weiyue/widgets/network_image.dart';
 import 'package:weiyue/models/models.dart';
 import 'package:weiyue/widgets/long_image_viewer.dart';
 import 'package:weiyue/widgets/status_card.dart';
@@ -34,9 +34,9 @@ void main() {
         home: LongImageReader(pics: [_longPic]),
       ));
       await tester.pump();
-      // 滚动阅读模式：有纵向滚动视图、无 PhotoView，标题带「长图」
+      // 滚动阅读模式：有纵向滚动视图、无手势缩放图，标题带「长图」
       expect(find.byKey(const ValueKey('long-image-scroll')), findsOneWidget);
-      expect(find.byType(PhotoView), findsNothing);
+      expect(find.byType(GestureImage), findsNothing);
       expect(find.textContaining('长图'), findsOneWidget);
       // 点模式切换按钮 → 缩放模式
       await tester.tap(find.byKey(const ValueKey('long-image-mode-toggle')));

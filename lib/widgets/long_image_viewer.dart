@@ -1,9 +1,9 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:extended_image_plus/extended_image_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:photo_view/photo_view.dart';
 
 import '../core/long_image.dart';
 import '../models/models.dart';
+import 'network_image.dart';
 import 'photo_gallery.dart';
 
 /// 打开图片查看的统一入口：
@@ -29,7 +29,7 @@ void openPicViewer(BuildContext context, List<WbPic> pics, int index) {
 /// 每张图独立判定模式：
 /// - 长图（接口尺寸已知，或打开后 ImageStream 解析出高宽比 ≥2.5）：
 ///   默认「滚动阅读」——宽度撑满、按原比例纵向滚动看全图；
-///   AppBar 按钮或双击可切「缩放细看」（PhotoView）。
+///   AppBar 按钮或双击可切「缩放细看」（extended_image_plus 手势模式）。
 /// - 普通图：缩放模式（与图库单页一致）。
 /// - 尺寸未知：先按缩放模式占位，解析出是长图后自动切滚动阅读
 ///   （用户已手动切换过模式的图不自动改）。
@@ -79,8 +79,9 @@ class _LongImageReaderState extends State<LongImageReader> {
   void _resolveSize(int i) {
     if (_isLong.containsKey(i)) return;
     final pic = widget.pics[i];
-    final stream = CachedNetworkImageProvider(
+    final stream = ExtendedNetworkImageProvider(
       pic.bestOriginal,
+      cache: true,
     ).resolve(const ImageConfiguration());
     late ImageStreamListener listener;
     listener = ImageStreamListener(
@@ -171,18 +172,18 @@ class _LongImageReaderState extends State<LongImageReader> {
           child: SingleChildScrollView(
             key: const ValueKey('long-image-scroll'),
             controller: _scrollController,
-            child: CachedNetworkImage(
-              imageUrl: pic.bestOriginal,
+            child: NetImage(
+              url: pic.bestOriginal,
               width: constraints.maxWidth,
               fit: BoxFit.fitWidth,
-              placeholder: (_, _) => SizedBox(
+              placeholderBuilder: (_) => SizedBox(
                 height: 420,
                 width: constraints.maxWidth,
                 child: const Center(
                   child: CircularProgressIndicator(color: Colors.white),
                 ),
               ),
-              errorWidget: (_, _, _) => SizedBox(
+              errorBuilder: (_) => SizedBox(
                 height: 300,
                 width: constraints.maxWidth,
                 child: const Center(
@@ -200,16 +201,13 @@ class _LongImageReaderState extends State<LongImageReader> {
     );
   }
 
-  /// 缩放细看：与图库单页一致的 PhotoView。
+  /// 缩放细看：与图库单页一致的手势模式 ExtendedImage，
+  /// 双击切回滚动阅读（与 AppBar 按钮同效）。
   Widget _buildZoomBody(WbPic pic) {
-    return PhotoView(
+    return GestureImage(
       key: const ValueKey('long-image-zoom'),
-      imageProvider: CachedNetworkImageProvider(pic.bestOriginal),
-      minScale: PhotoViewComputedScale.contained,
-      maxScale: PhotoViewComputedScale.covered * 3,
-      backgroundDecoration: const BoxDecoration(color: Colors.black),
-      loadingBuilder: (_, _) =>
-          const Center(child: CircularProgressIndicator(color: Colors.white)),
+      url: pic.bestOriginal,
+      onDoubleTap: (_) => _toggleMode(),
     );
   }
 }

@@ -1,7 +1,7 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
+import 'network_image.dart';
 
 /// 圆角图片，带加载占位与失败占位（头像/封面通用）
 class CoverImage extends StatelessWidget {
@@ -30,10 +30,10 @@ class CoverImage extends StatelessWidget {
                 color: AppColors.card,
                 child: Icon(fallbackIcon, color: AppColors.textSecondary),
               )
-            : CachedNetworkImage(
-                imageUrl: url,
+            : NetImage(
+                url: url,
                 fit: BoxFit.cover,
-                placeholder: (_, _) => Container(
+                placeholderBuilder: (_) => Container(
                   color: AppColors.card,
                   child: const Center(
                     child: SizedBox(
@@ -43,7 +43,7 @@ class CoverImage extends StatelessWidget {
                     ),
                   ),
                 ),
-                errorWidget: (_, _, _) => Container(
+                errorBuilder: (_) => Container(
                   color: AppColors.card,
                   child: Icon(fallbackIcon, color: AppColors.textSecondary),
                 ),

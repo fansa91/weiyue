@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +8,7 @@ import '../core/utils.dart';
 import '../models/models.dart';
 import 'cover_image.dart';
 import 'long_image_viewer.dart';
+import 'network_image.dart';
 
 /// 正文富文本分段：高亮 #话题#、@用户、链接，并把 [表情] 短码换成行内
 /// 表情图（WidgetSpan）。话题点击默认打开话题页（见 WbRichText）；
@@ -39,11 +39,11 @@ List<InlineSpan> buildWbTextSpans(
         spans.add(
           WidgetSpan(
             alignment: PlaceholderAlignment.middle,
-            child: CachedNetworkImage(
-              imageUrl: url,
+            child: NetImage(
+              url: url,
               width: emoticonSize,
               height: emoticonSize,
-              errorWidget: (_, _, _) => Text(token),
+              errorBuilder: (_) => Text(token),
             ),
           ),
         );
@@ -370,11 +370,11 @@ class _PicGrid extends StatelessWidget {
                   maxHeight: 320,
                   maxWidth: 420,
                 ),
-                child: CachedNetworkImage(
-                  imageUrl: pic.bestMiddle,
+                child: NetImage(
+                  url: pic.bestMiddle,
                   fit: BoxFit.cover,
-                  errorWidget: (_, _, _) => _errBox(context, height: 180),
-                  placeholder: (_, _) => _errBox(context, height: 180),
+                  errorBuilder: (_) => _errBox(context, height: 180),
+                  placeholderBuilder: (_) => _errBox(context, height: 180),
                 ),
               ),
               // 已知尺寸的长图：封顶高度裁剪展示 + 「长图」角标，
@@ -418,11 +418,11 @@ class _PicGrid extends StatelessWidget {
           onTap: () => openPicViewer(context, pics, i),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(6),
-            child: CachedNetworkImage(
-              imageUrl: pics[i].bestMiddle,
+            child: NetImage(
+              url: pics[i].bestMiddle,
               fit: BoxFit.cover,
-              errorWidget: (_, _, _) => _errBox(context),
-              placeholder: (_, _) => _errBox(context),
+              errorBuilder: (_) => _errBox(context),
+              placeholderBuilder: (_) => _errBox(context),
             ),
           ),
         );
@@ -457,10 +457,10 @@ class _VideoCover extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               if (video.cover.isNotEmpty)
-                CachedNetworkImage(
-                  imageUrl: video.cover,
+                NetImage(
+                  url: video.cover,
                   fit: BoxFit.cover,
-                  errorWidget: (_, _, _) => Container(color: Colors.black87),
+                  errorBuilder: (_) => Container(color: Colors.black87),
                 )
               else
                 Container(color: Colors.black87),
