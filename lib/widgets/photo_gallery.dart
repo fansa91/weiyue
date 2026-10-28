@@ -1,6 +1,7 @@
 import 'package:extended_image_plus/extended_image_plus.dart';
 import 'package:flutter/material.dart';
 
+import '../core/quality.dart';
 import '../models/models.dart';
 import 'network_image.dart';
 
@@ -13,8 +14,15 @@ import 'network_image.dart';
 class PhotoGalleryScreen extends StatefulWidget {
   final List<WbPic> pics;
   final int initialIndex;
-  const PhotoGalleryScreen(
-      {super.key, required this.pics, this.initialIndex = 0});
+
+  /// 查看用图档位：默认标准（图库大图，省流量档降为中图）。
+  final ImageQualityPref imageQuality;
+  const PhotoGalleryScreen({
+    super.key,
+    required this.pics,
+    this.initialIndex = 0,
+    this.imageQuality = ImageQualityPref.standard,
+  });
 
   @override
   State<PhotoGalleryScreen> createState() => _PhotoGalleryScreenState();
@@ -46,7 +54,10 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
         onPageChanged: (i) => setState(() => _index = i),
         itemBuilder: (context, i) {
           final pic = widget.pics[i];
-          return GestureImage(url: pic.bestLarge, inPageView: true);
+          return GestureImage(
+            url: pic.galleryUrl(widget.imageQuality),
+            inPageView: true,
+          );
         },
       ),
     );

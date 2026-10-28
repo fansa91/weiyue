@@ -2,6 +2,7 @@ import 'package:extended_image_plus/extended_image_plus.dart';
 import 'package:flutter/material.dart';
 
 import '../core/long_image.dart';
+import '../core/quality.dart';
 import '../models/models.dart';
 import 'network_image.dart';
 import 'photo_gallery.dart';
@@ -12,14 +13,27 @@ import 'photo_gallery.dart';
 /// - 多图帖点中已知长图 → [LongImageReader]（内含上一张/下一张，
 ///   可逐张翻看整组，其余图按各自尺寸决定模式）；
 /// - 多图帖点中普通/未知图 → 原图库 [PhotoGalleryScreen]（左右滑 + 缩放）。
-void openPicViewer(BuildContext context, List<WbPic> pics, int index) {
+void openPicViewer(
+  BuildContext context,
+  List<WbPic> pics,
+  int index, {
+  ImageQualityPref imageQuality = ImageQualityPref.standard,
+}) {
   if (pics.isEmpty) return;
   final i = index.clamp(0, pics.length - 1);
   Navigator.of(context).push(
     MaterialPageRoute(
       builder: (_) => (pics.length == 1 || pics[i].isLongImage)
-          ? LongImageReader(pics: pics, initialIndex: i)
-          : PhotoGalleryScreen(pics: pics, initialIndex: i),
+          ? LongImageReader(
+              pics: pics,
+              initialIndex: i,
+              imageQuality: imageQuality,
+            )
+          : PhotoGalleryScreen(
+              pics: pics,
+              initialIndex: i,
+              imageQuality: imageQuality,
+            ),
     ),
   );
 }
@@ -39,7 +53,15 @@ class LongImageReader extends StatefulWidget {
   final List<WbPic> pics;
   final int initialIndex;
 
-  const LongImageReader({super.key, required this.pics, this.initialIndex = 0});
+  /// 查看用图档位：默认标准（长图查看原图，省流量档降为中图）。
+  final ImageQualityPref imageQuality;
+
+  const LongImageReader({
+    super.key,
+    required this.pics,
+    this.initialIndex = 0,
+    this.imageQuality = ImageQualityPref.standard,
+  });
 
   @override
   State<LongImageReader> createState() => _LongImageReaderState();
@@ -80,7 +102,7 @@ class _LongImageReaderState extends State<LongImageReader> {
     if (_isLong.containsKey(i)) return;
     final pic = widget.pics[i];
     final stream = ExtendedNetworkImageProvider(
-      pic.bestOriginal,
+      pic.longViewerUrl(widget.imageQuality),
       cache: true,
     ).resolve(const ImageConfiguration());
     late ImageStreamListener listener;
@@ -173,7 +195,7 @@ class _LongImageReaderState extends State<LongImageReader> {
             key: const ValueKey('long-image-scroll'),
             controller: _scrollController,
             child: NetImage(
-              url: pic.bestOriginal,
+              url: pic.longViewerUrl(widget.imageQuality),
               width: constraints.maxWidth,
               fit: BoxFit.fitWidth,
               placeholderBuilder: (_) => SizedBox(
@@ -206,7 +228,7 @@ class _LongImageReaderState extends State<LongImageReader> {
   Widget _buildZoomBody(WbPic pic) {
     return GestureImage(
       key: const ValueKey('long-image-zoom'),
-      url: pic.bestOriginal,
+      url: pic.longViewerUrl(widget.imageQuality),
       onDoubleTap: (_) => _toggleMode(),
     );
   }

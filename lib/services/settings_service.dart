@@ -2,6 +2,8 @@ import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/quality.dart';
+
 /// 应用设置：主题模式 / 主题色等，持久化到 SharedPreferences。
 /// 直连小宇宙官方 API，不再需要配置自部署后端地址。
 class SettingsService extends ChangeNotifier {
@@ -12,6 +14,8 @@ class SettingsService extends ChangeNotifier {
   static const _keyCustomColors = 'custom_colors';
   static const _keyWaveformProgress = 'waveform_progress';
   static const _keyVideoAutoplay = 'video_autoplay';
+  static const _keyVideoQuality = 'video_quality';
+  static const _keyImageQuality = 'image_quality';
 
   /// 预设主题色
   static const List<ThemePreset> themePresets = [
@@ -48,6 +52,14 @@ class SettingsService extends ChangeNotifier {
   /// 视频自动播放：打开视频详情时内嵌预览是否自动播放，默认开
   bool _videoAutoplay = true;
   bool get videoAutoplay => _videoAutoplay;
+
+  /// 默认视频清晰度：默认自动（≤720p 的最高档）
+  VideoQualityPref _videoQuality = VideoQualityPref.auto;
+  VideoQualityPref get videoQuality => _videoQuality;
+
+  /// 默认图片清晰度：默认标准（列表中图、图库大图、长图原图）
+  ImageQualityPref _imageQuality = ImageQualityPref.standard;
+  ImageQualityPref get imageQuality => _imageQuality;
 
   /// M3 动态取色（跟随系统壁纸，Android 12+ 有效），默认开启
   bool _dynamicColor = true;
@@ -88,6 +100,14 @@ class SettingsService extends ChangeNotifier {
         _prefs.getStringList(_keyCustomColors)?.map(int.parse).toList() ?? [];
     _waveformProgress = _prefs.getBool(_keyWaveformProgress) ?? false;
     _videoAutoplay = _prefs.getBool(_keyVideoAutoplay) ?? true;
+    _videoQuality = VideoQualityPref.values.firstWhere(
+      (e) => e.name == _prefs.getString(_keyVideoQuality),
+      orElse: () => VideoQualityPref.auto,
+    );
+    _imageQuality = ImageQualityPref.values.firstWhere(
+      (e) => e.name == _prefs.getString(_keyImageQuality),
+      orElse: () => ImageQualityPref.standard,
+    );
   }
 
   /// 通过系统 CorePalette 取种子色，M3 明暗主题分别用 fromSeed 生成
@@ -148,6 +168,20 @@ class SettingsService extends ChangeNotifier {
     if (value == _videoAutoplay) return;
     _videoAutoplay = value;
     await _prefs.setBool(_keyVideoAutoplay, value);
+    notifyListeners();
+  }
+
+  Future<void> setVideoQuality(VideoQualityPref value) async {
+    if (value == _videoQuality) return;
+    _videoQuality = value;
+    await _prefs.setString(_keyVideoQuality, value.name);
+    notifyListeners();
+  }
+
+  Future<void> setImageQuality(ImageQualityPref value) async {
+    if (value == _imageQuality) return;
+    _imageQuality = value;
+    await _prefs.setString(_keyImageQuality, value.name);
     notifyListeners();
   }
 

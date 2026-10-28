@@ -1,9 +1,11 @@
 import 'package:flutter/gestures.dart';
+import 'package:provider/provider.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/emoticons.dart';
 import '../core/nav.dart';
+import '../services/settings_service.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
 import 'cover_image.dart';
@@ -357,10 +359,13 @@ class _PicGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 列表用图档位跟随设置；改设置后列表即时重建换档。
+    final imageQuality = context.watch<SettingsService>().imageQuality;
     if (pics.length == 1) {
       final pic = pics.first;
       return GestureDetector(
-        onTap: () => openPicViewer(context, pics, 0),
+        onTap: () =>
+            openPicViewer(context, pics, 0, imageQuality: imageQuality),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(10),
           child: Stack(
@@ -371,7 +376,7 @@ class _PicGrid extends StatelessWidget {
                   maxWidth: 420,
                 ),
                 child: NetImage(
-                  url: pic.bestMiddle,
+                  url: pic.feedUrl(imageQuality),
                   fit: BoxFit.cover,
                   errorBuilder: (_) => _errBox(context, height: 180),
                   placeholderBuilder: (_) => _errBox(context, height: 180),
@@ -415,11 +420,12 @@ class _PicGrid extends StatelessWidget {
       itemCount: pics.length > 9 ? 9 : pics.length,
       itemBuilder: (context, i) {
         return GestureDetector(
-          onTap: () => openPicViewer(context, pics, i),
+          onTap: () =>
+              openPicViewer(context, pics, i, imageQuality: imageQuality),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: NetImage(
-              url: pics[i].bestMiddle,
+              url: pics[i].feedUrl(imageQuality),
               fit: BoxFit.cover,
               errorBuilder: (_) => _errBox(context),
               placeholderBuilder: (_) => _errBox(context),

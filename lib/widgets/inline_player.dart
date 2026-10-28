@@ -181,7 +181,10 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
   }
 
   void _initDims(WbStatus status) {
-    final p = status.video?.defaultPlayback;
+    // 默认档跟随设置里的默认视频清晰度；手动切档后 _current 已定，
+    // 换帖时 _resetPlayback 会清掉它，这里重新按设置取档。
+    final quality = context.read<SettingsService>().videoQuality;
+    final p = status.video?.playbackFor(quality) ?? status.video?.defaultPlayback;
     _current = p;
     _videoWidth = p?.width;
     _videoHeight = p?.height;
@@ -200,7 +203,11 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
   Future<void> _start({WbPlayback? quality}) async {
     final video = widget.status.video;
     if (video == null) return;
-    final target = quality ?? _current ?? video.defaultPlayback;
+    // 未手动选档时按设置里的默认清晰度取档；_current 已是该档时等价。
+    final settingDefault = video.playbackFor(
+      context.read<SettingsService>().videoQuality,
+    );
+    final target = quality ?? _current ?? settingDefault ?? video.defaultPlayback;
     final url = target?.url ?? video.defaultUrl;
     if (url == null || url.isEmpty) return;
 

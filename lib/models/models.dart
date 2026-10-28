@@ -1,6 +1,7 @@
 import 'package:intl/intl.dart';
 
 import '../core/long_image.dart';
+import '../core/quality.dart';
 import '../core/utils.dart';
 
 /// 微博数据模型（只取客户端需要的子集）。
@@ -151,6 +152,45 @@ class WbPic {
   /// 查看长图/原图优先 original，其次 large。
   String get bestOriginal => original.isNotEmpty ? original : bestLarge;
 
+  /// 列表（帖子卡片、相册宫格）用图：跟随图片清晰度设置。
+  String feedUrl(ImageQualityPref pref) {
+    switch (pref) {
+      case ImageQualityPref.standard:
+        return bestMiddle;
+      case ImageQualityPref.hd:
+        return bestLarge;
+      case ImageQualityPref.original:
+        return bestOriginal;
+      case ImageQualityPref.dataSaver:
+        return thumbnail.isNotEmpty ? thumbnail : bestMiddle;
+    }
+  }
+
+  /// 图库查看器用图：跟随图片清晰度设置。
+  String galleryUrl(ImageQualityPref pref) {
+    switch (pref) {
+      case ImageQualityPref.standard:
+        return bestLarge;
+      case ImageQualityPref.hd:
+      case ImageQualityPref.original:
+        return bestOriginal;
+      case ImageQualityPref.dataSaver:
+        return bestMiddle;
+    }
+  }
+
+  /// 长图查看器用图：长图查看本就是看原图，只有省流量档降为中图。
+  String longViewerUrl(ImageQualityPref pref) {
+    switch (pref) {
+      case ImageQualityPref.dataSaver:
+        return bestMiddle;
+      case ImageQualityPref.standard:
+      case ImageQualityPref.hd:
+      case ImageQualityPref.original:
+        return bestOriginal;
+    }
+  }
+
   /// 尺寸已知且高宽比 ≥2.5 → 长图。
   bool get isLongImage => isLongAspect(width, height);
 
@@ -199,6 +239,20 @@ class WbVideo {
     if (playbackList.isEmpty) return null;
     for (final p in playbackList) {
       if (p.height <= 720) return p;
+    }
+    return playbackList.last;
+  }
+
+  /// 按清晰度设置选档：取「高度 ≤ 上限的最高档」，没有符合的取最低档；
+  /// 最高档取档位表第一档；自动沿用 [defaultPlayback]。
+  /// 高度为 0 的档不参与上限比较（元数据缺失时不被误选）。
+  WbPlayback? playbackFor(VideoQualityPref pref) {
+    if (playbackList.isEmpty) return null;
+    if (pref == VideoQualityPref.auto) return defaultPlayback;
+    if (pref == VideoQualityPref.highest) return playbackList.first;
+    final cap = pref.maxHeight!;
+    for (final p in playbackList) {
+      if (p.height > 0 && p.height <= cap) return p;
     }
     return playbackList.last;
   }

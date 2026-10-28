@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/quality.dart';
 import '../services/settings_service.dart';
 import 'theme_screen.dart';
 import '../widgets/detail_scaffold.dart';
@@ -35,9 +36,77 @@ class SettingsScreen extends StatelessWidget {
             onChanged: (v) => settings.setVideoAutoplay(v),
           ),
           const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.high_quality_outlined),
+            title: const Text('默认视频清晰度'),
+            subtitle: Text(settings.videoQuality.label),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _pickVideoQuality(context, settings),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.image_outlined),
+            title: const Text('默认图片清晰度'),
+            subtitle: Text(
+              '${settings.imageQuality.label} · 列表与查看器用图档位',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _pickImageQuality(context, settings),
+          ),
+          const Divider(height: 1),
           const SizedBox(height: 24),
         ],
       ),
     );
+  }
+
+  Future<void> _pickVideoQuality(
+    BuildContext context,
+    SettingsService settings,
+  ) async {
+    final picked = await showDialog<VideoQualityPref>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('默认视频清晰度'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final q in VideoQualityPref.values)
+              RadioListTile<VideoQualityPref>(
+                title: Text(q.label),
+                value: q,
+                groupValue: settings.videoQuality,
+                onChanged: (_) => Navigator.of(ctx).pop(q),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked != null) await settings.setVideoQuality(picked);
+  }
+
+  Future<void> _pickImageQuality(
+    BuildContext context,
+    SettingsService settings,
+  ) async {
+    final picked = await showDialog<ImageQualityPref>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('默认图片清晰度'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final q in ImageQualityPref.values)
+              RadioListTile<ImageQualityPref>(
+                title: Text(q.label),
+                value: q,
+                groupValue: settings.imageQuality,
+                onChanged: (_) => Navigator.of(ctx).pop(q),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (picked != null) await settings.setImageQuality(picked);
   }
 }

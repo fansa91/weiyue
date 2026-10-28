@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../core/utils.dart';
 import '../models/models.dart';
+import '../services/settings_service.dart';
 import '../services/weiyue_service.dart';
 import '../widgets/detail_scaffold.dart';
 import '../widgets/long_image_viewer.dart';
@@ -524,6 +525,9 @@ class _AlbumTabState extends State<_AlbumTab> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
+    // 相册宫格用图档位跟随设置；改设置后宫格即时重建换档。
+    final imageQuality =
+        context.watch<SettingsService>().imageQuality;
     // 拍平：(所属图集, 图下标)
     final flat = <(List<WbPic>, int)>[];
     for (final g in _groups) {
@@ -543,9 +547,14 @@ class _AlbumTabState extends State<_AlbumTab> {
       itemBuilder: (context, i) {
         final (pics, idx) = flat[i];
         return GestureDetector(
-          onTap: () => openPicViewer(context, pics, idx),
+          onTap: () => openPicViewer(
+            context,
+            pics,
+            idx,
+            imageQuality: imageQuality,
+          ),
           child: NetImage(
-            url: pics[idx].bestMiddle,
+            url: pics[idx].feedUrl(imageQuality),
             fit: BoxFit.cover,
             errorBuilder: (_) => Container(
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
