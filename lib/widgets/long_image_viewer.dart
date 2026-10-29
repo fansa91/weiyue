@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../core/long_image.dart';
 import '../core/quality.dart';
 import '../models/models.dart';
+import 'download_button.dart';
 import 'network_image.dart';
 import 'photo_gallery.dart';
 import 'viewer_nav.dart';
@@ -175,6 +176,11 @@ class _LongImageReaderState extends State<LongImageReader> {
             onPressed: _index < widget.pics.length - 1
                 ? () => _goTo(_index + 1)
                 : null,
+          ),
+          PicDownloadButton(
+            pic: pic,
+            baseName: 'weiyue_${pic.pid.isNotEmpty ? pic.pid : 'img$_index'}',
+            color: Colors.white,
           ),
           if (isLong)
             IconButton(

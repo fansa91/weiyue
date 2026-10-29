@@ -70,5 +70,7 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>把你选择的图片和视频保存到相册</string>
 </dict>
 </plist>

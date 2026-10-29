@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 
 import '../core/ime.dart';
 import '../core/utils.dart';
+import 'download_button.dart';
 import 'network_image.dart';
 import '../models/models.dart';
 import '../services/settings_service.dart';
@@ -493,6 +494,14 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
                     onPressed: () => _playback?.toggleFullscreen(),
                   ),
                 ),
+                const SizedBox(width: 6),
+                // 下载视频（按设置默认清晰度取档，与播放默认档一致）
+                _circleButton(
+                  child: VideoDownloadButton(
+                    status: widget.status,
+                    color: Colors.white,
+                  ),
+                ),
               ],
             ),
           ),
@@ -542,6 +551,17 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
         else
           Container(color: Colors.black87),
         Container(color: Colors.black.withValues(alpha: 0.18)),
+        // 未开播时也能直接下载视频（右上角）
+        Positioned(
+          top: 6,
+          right: 6,
+          child: _circleButton(
+            child: VideoDownloadButton(
+              status: widget.status,
+              color: Colors.white,
+            ),
+          ),
+        ),
         Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,

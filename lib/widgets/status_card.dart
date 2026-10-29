@@ -10,7 +10,9 @@ import '../core/quality.dart';
 import '../services/settings_service.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
+import '../services/download_service.dart';
 import 'cover_image.dart';
+import 'download_button.dart';
 import 'long_image_viewer.dart';
 import 'network_image.dart';
 
@@ -130,12 +132,16 @@ class StatusCard extends StatelessWidget {
   /// 列表态不传，保持封面 + 播放图标，避免列表出现多个播放器。
   final Widget? videoOverride;
 
+  /// 视频封面「下载视频」用的下载服务覆盖（测试注入；默认共享实例）。
+  final DownloadService? downloadService;
+
   const StatusCard({
     super.key,
     required this.status,
     this.tappable = true,
     this.expanded = false,
     this.videoOverride,
+    this.downloadService,
   });
 
   @override
@@ -226,7 +232,10 @@ class StatusCard extends StatelessWidget {
           // 转发内嵌卡
           if (status.retweeted != null) ...[
             const SizedBox(height: 8),
-            _RetweetedBlock(status: status.retweeted!),
+            _RetweetedBlock(
+              status: status.retweeted!,
+              downloadService: downloadService,
+            ),
           ],
           // 图片宫格
           if (status.pics.isNotEmpty) ...[
@@ -236,7 +245,8 @@ class StatusCard extends StatelessWidget {
           // 视频封面（详情页传 videoOverride 时换成内嵌播放器）
           if (status.hasVideo) ...[
             const SizedBox(height: 8),
-            videoOverride ?? _VideoCover(status: status),
+            videoOverride ??
+                _VideoCover(status: status, downloadService: downloadService),
           ],
           const SizedBox(height: 6),
           // 底栏计数
@@ -320,7 +330,8 @@ class _CountItem extends StatelessWidget {
 
 class _RetweetedBlock extends StatelessWidget {
   final WbStatus status;
-  const _RetweetedBlock({required this.status});
+  final DownloadService? downloadService;
+  const _RetweetedBlock({required this.status, this.downloadService});
 
   @override
   Widget build(BuildContext context) {
@@ -347,7 +358,7 @@ class _RetweetedBlock extends StatelessWidget {
           ],
           if (status.hasVideo) ...[
             const SizedBox(height: 6),
-            _VideoCover(status: status),
+            _VideoCover(status: status, downloadService: downloadService),
           ],
         ],
       ),
@@ -469,7 +480,8 @@ class _PicGrid extends StatelessWidget {
 
 class _VideoCover extends StatelessWidget {
   final WbStatus status;
-  const _VideoCover({required this.status});
+  final DownloadService? downloadService;
+  const _VideoCover({required this.status, this.downloadService});
 
   @override
   Widget build(BuildContext context) {
@@ -498,6 +510,16 @@ class _VideoCover extends StatelessWidget {
                   Icons.play_circle_fill,
                   size: 56,
                   color: Colors.white,
+                ),
+              ),
+              // 右上角「更多」菜单：下载视频（按设置默认清晰度取档）
+              Positioned(
+                top: 4,
+                right: 4,
+                child: VideoDownloadButton(
+                  status: status,
+                  asMenu: true,
+                  service: downloadService,
                 ),
               ),
               Positioned(

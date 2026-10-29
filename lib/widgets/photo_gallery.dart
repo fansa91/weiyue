@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../core/quality.dart';
 import '../models/models.dart';
+import 'download_button.dart';
 import 'network_image.dart';
 import 'viewer_nav.dart';
 
@@ -61,6 +62,14 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
         foregroundColor: Colors.white,
         // 多图时才显示「第几页 / 总数」；单图不显示页码。
         title: multi ? Text('${_index + 1} / ${widget.pics.length}') : null,
+        actions: [
+          PicDownloadButton(
+            pic: widget.pics[_index],
+            baseName:
+                'weiyue_${widget.pics[_index].pid.isNotEmpty ? widget.pics[_index].pid : 'img$_index'}',
+            color: Colors.white,
+          ),
+        ],
       ),
       body: ViewerKeyboardShortcuts(
         canPrev: _index > 0,
