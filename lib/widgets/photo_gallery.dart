@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../core/quality.dart';
 import '../models/models.dart';
 import 'network_image.dart';
+import 'viewer_nav.dart';
 
 /// 图片画廊：左右滑切换、双指缩放，看 large 图。
 ///
@@ -39,9 +40,20 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
     super.dispose();
   }
 
+  void _goTo(int i) {
+    final target = i.clamp(0, widget.pics.length - 1);
+    if (target == _index) return;
+    _controller.animateToPage(
+      target,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOut,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final multi = widget.pics.length > 1;
+    final showSideButtons = multi && viewerShowsSideButtons(context);
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -50,20 +62,34 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
         // 多图时才显示「第几页 / 总数」；单图不显示页码。
         title: multi ? Text('${_index + 1} / ${widget.pics.length}') : null,
       ),
-      body: Stack(
-        children: [
-          ExtendedImageGesturePageView.builder(
-            controller: _controller,
-            itemCount: widget.pics.length,
-            onPageChanged: (i) => setState(() => _index = i),
-            itemBuilder: (context, i) {
-              final pic = widget.pics[i];
-              return GestureImage(
-                url: pic.galleryUrl(widget.imageQuality),
-                inPageView: true,
-              );
-            },
-          ),
+      body: ViewerKeyboardShortcuts(
+        canPrev: _index > 0,
+        canNext: _index < widget.pics.length - 1,
+        onPrev: () => _goTo(_index - 1),
+        onNext: () => _goTo(_index + 1),
+        child: Stack(
+          children: [
+            ExtendedImageGesturePageView.builder(
+              controller: _controller,
+              itemCount: widget.pics.length,
+              onPageChanged: (i) => setState(() => _index = i),
+              itemBuilder: (context, i) {
+                final pic = widget.pics[i];
+                return GestureImage(
+                  url: pic.galleryUrl(widget.imageQuality),
+                  inPageView: true,
+                );
+              },
+            ),
+            // 桌面/宽屏：查看区两侧上一张/下一张按钮（移动端靠手势，不显示）
+            if (showSideButtons)
+              Positioned.fill(
+                child: ViewerSideButtons(
+                  index: _index,
+                  count: widget.pics.length,
+                  onGoTo: _goTo,
+                ),
+              ),
           // 多图时底部黑底页码（AppBar 透明底在亮图上看不清时仍可读），
           // 不拦截手势。
           if (multi)
@@ -94,7 +120,8 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
                 ),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }

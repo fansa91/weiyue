@@ -6,6 +6,7 @@ import '../core/quality.dart';
 import '../models/models.dart';
 import 'network_image.dart';
 import 'photo_gallery.dart';
+import 'viewer_nav.dart';
 
 /// 打开图片查看的统一入口：
 /// - 单图帖 → [LongImageReader]：尺寸已知按已知判定长图；未知先按
@@ -188,11 +189,26 @@ class _LongImageReaderState extends State<LongImageReader> {
             ),
         ],
       ),
-      body: Stack(
-        children: [
-          _scrollMode ? _buildScrollBody(pic) : _buildZoomBody(pic),
-          // 多图时底部黑底页码（与图库一致），不拦截手势。
-          if (multi)
+      body: ViewerKeyboardShortcuts(
+        canPrev: _index > 0,
+        canNext: _index < widget.pics.length - 1,
+        onPrev: () => _goTo(_index - 1),
+        onNext: () => _goTo(_index + 1),
+        child: Stack(
+          children: [
+            _scrollMode ? _buildScrollBody(pic) : _buildZoomBody(pic),
+            // 桌面/宽屏：查看区两侧上一张/下一张按钮（与图库统一；
+            // AppBar 上的小箭头保留，窄屏仍可用）。
+            if (multi && viewerShowsSideButtons(context))
+              Positioned.fill(
+                child: ViewerSideButtons(
+                  index: _index,
+                  count: widget.pics.length,
+                  onGoTo: _goTo,
+                ),
+              ),
+            // 多图时底部黑底页码（与图库一致），不拦截手势。
+            if (multi)
             Positioned(
               left: 0,
               right: 0,
@@ -220,7 +236,8 @@ class _LongImageReaderState extends State<LongImageReader> {
                 ),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
