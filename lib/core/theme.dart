@@ -2,9 +2,6 @@ import 'package:flutter/material.dart';
 
 class AppColors {
   static const primary = Color(0xFFD33A31); // 网易云红
-  /// 应用品牌红（与应用图标一致）：Fluent/Cupertino 壳的强调色，
-  /// 以及非 Material 壳下桥接主题的种子色。
-  static const accent = Color(0xFFE6162D);
   static const bg = Color(0xFF141518);
   static const card = Color(0xFF1F2025);
   static const divider = Color(0xFF2A2B31);

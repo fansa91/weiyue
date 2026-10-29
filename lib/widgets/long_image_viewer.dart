@@ -2,7 +2,6 @@ import 'package:extended_image_plus/extended_image_plus.dart';
 import 'package:flutter/material.dart';
 
 import '../core/long_image.dart';
-import '../core/nav.dart';
 import '../core/quality.dart';
 import '../models/models.dart';
 import 'network_image.dart';
@@ -23,7 +22,7 @@ void openPicViewer(
   if (pics.isEmpty) return;
   final i = index.clamp(0, pics.length - 1);
   Navigator.of(context).push(
-    appPageRoute(
+    MaterialPageRoute(
       builder: (_) => (pics.length == 1 || pics[i].isLongImage)
           ? LongImageReader(
               pics: pics,
