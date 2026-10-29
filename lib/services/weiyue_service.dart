@@ -1460,6 +1460,315 @@ class WeiyueService {
     }
   }
 
+  // ---------------- 消息中心（登录态只读，/ajax/message 族） ----------------
+  // 依据：WEIBO_API.md「登录与写接口」节静态确认路径 + PC 网页端主包
+  // （raw/pc_index.js）消息页组件实证：页签配置（tagMessage）、双游标
+  // 分页（请求 max_id+sinceId，响应 data.next_cursor/data.nextId）、
+  // 信封（data[<类型键>] 为条目数组）、各类型条目字段。登录态真实
+  // 返回未经真机实测，解析全部防御式，失败记入登录诊断。
+
+  /// 消息族列表信封解包。[typeKey] 为该接口的条目键
+  /// （list/statuses/comments/attitudes）。防御顺序：data[typeKey] →
+  /// data 的 list/statuses/comments/attitudes/data → data 本身为数组 →
+  /// 顶层同名键。终止判据（主包实证）：list 型看 nextId==0，其余看
+  /// next_cursor==0；本页为空也终止。某一游标缺失时退回看另一游标。
+  ({List<dynamic> raw, String maxId, String sinceId, bool hasMore})
+  _messageEnvelope(Map<String, dynamic> json, String typeKey) {
+    final data = _asMap(json['data']);
+    var raw = _asList(data[typeKey]);
+    if (raw.isEmpty) {
+      for (final k in const [
+        'list',
+        'statuses',
+        'comments',
+        'attitudes',
+        'data',
+      ]) {
+        raw = _asList(data[k]);
+        if (raw.isNotEmpty) break;
+      }
+    }
+    if (raw.isEmpty) raw = _asList(json['data']);
+    if (raw.isEmpty) {
+      for (final k in [
+        typeKey,
+        'list',
+        'statuses',
+        'comments',
+        'attitudes',
+      ]) {
+        raw = _asList(json[k]);
+        if (raw.isNotEmpty) break;
+      }
+    }
+    String cursorOf(dynamic v) {
+      final s = '${v ?? ''}'.trim();
+      return (s.isEmpty || s == 'null') ? '' : s;
+    }
+
+    final nextMaxId = cursorOf(data['next_cursor'] ?? json['next_cursor']);
+    final nextSinceId = cursorOf(
+      data['nextId'] ?? data['next_id'] ?? json['nextId'],
+    );
+    var hasMore = raw.isNotEmpty;
+    if (hasMore) {
+      bool live(String c) => c.isNotEmpty && c != '0';
+      if (typeKey == 'list') {
+        hasMore = nextSinceId.isNotEmpty
+            ? live(nextSinceId)
+            : live(nextMaxId);
+      } else {
+        hasMore = nextMaxId.isNotEmpty ? live(nextMaxId) : live(nextSinceId);
+      }
+    }
+    return (raw: raw, maxId: nextMaxId, sinceId: nextSinceId, hasMore: hasMore);
+  }
+
+  /// 消息族列表通用拉取：双游标透传，失败记诊断后原样上抛。
+  Future<MessagePage<dynamic>> _messageList(
+    String path,
+    String typeKey, {
+    Map<String, dynamic> extra = const {},
+    String maxId = '',
+    String sinceId = '',
+  }) async {
+    try {
+      final json = await _get(
+        WbStack.pc,
+        '$_pcBase$path',
+        query: {
+          ...extra,
+          'max_id': maxId.isEmpty ? 0 : maxId,
+          if (sinceId.isNotEmpty) 'sinceId': sinceId,
+        },
+        referer: 'https://weibo.com/messages',
+      );
+      final env = _messageEnvelope(json, typeKey);
+      return (
+        items: env.raw,
+        maxId: env.maxId,
+        sinceId: env.sinceId,
+        hasMore: env.hasMore,
+      );
+    } catch (e) {
+      session.recordLoginFailure(path, '$e');
+      rethrow;
+    }
+  }
+
+  /// 全部消息（近 24 小时混合流）：GET /ajax/message/msgList?type=all。
+  /// ⚠️ 主包实证语义是「24 小时全部」混合流（状态/评论/赞按 msg_type
+  /// 混排），不是私信会话列表——网页端私信走独立 chat 子系统，
+  /// 不在 message 族内（见报告）。
+  Future<MessagePage<MessageFeedItem>> getMessageFeed({
+    String maxId = '',
+    String sinceId = '',
+  }) async {
+    final page = await _messageList(
+      '/ajax/message/msgList',
+      'list',
+      extra: const {'type': 'all'},
+      maxId: maxId,
+      sinceId: sinceId,
+    );
+    return (
+      items: page.items
+          .map((e) => MessageFeedItem.fromJson(_asMap(e)))
+          .where((it) => it.hasContent)
+          .toList(),
+      maxId: page.maxId,
+      sinceId: page.sinceId,
+      hasMore: page.hasMore,
+    );
+  }
+
+  /// @我的微博：GET /ajax/statuses/mentions（主包 atMe 页签实证；
+  /// filter_by_author=1 只看关注的人，filter_by_type=1 只看原创）。
+  Future<MessagePage<WbStatus>> getMentions({
+    String maxId = '',
+    String sinceId = '',
+    bool onlyFollowed = false,
+    bool onlyOriginal = false,
+  }) async {
+    final page = await _messageList(
+      '/ajax/statuses/mentions',
+      'statuses',
+      extra: {
+        if (onlyFollowed) 'filter_by_author': 1,
+        if (onlyOriginal) 'filter_by_type': 1,
+      },
+      maxId: maxId,
+      sinceId: sinceId,
+    );
+    return (
+      items: page.items
+          .map((e) => WbStatus.fromJson(_asMap(e)))
+          .where((s) => s.id.isNotEmpty)
+          .toList(),
+      maxId: page.maxId,
+      sinceId: page.sinceId,
+      hasMore: page.hasMore,
+    );
+  }
+
+  /// @我的评论：GET /ajax/comments/mentions（主包 atMe 页签实证）。
+  Future<MessagePage<MessageComment>> getMentionComments({
+    String maxId = '',
+    String sinceId = '',
+    bool onlyFollowed = false,
+  }) async {
+    final page = await _messageList(
+      '/ajax/comments/mentions',
+      'comments',
+      extra: {if (onlyFollowed) 'filter_by_author': 1},
+      maxId: maxId,
+      sinceId: sinceId,
+    );
+    return (
+      items: page.items
+          .map((e) => MessageComment.fromJson(_asMap(e)))
+          .where((c) => c.comment.id.isNotEmpty)
+          .toList(),
+      maxId: page.maxId,
+      sinceId: page.sinceId,
+      hasMore: page.hasMore,
+    );
+  }
+
+  /// 收到的评论：GET /ajax/message/cmt（filter_by_author=1 只看
+  /// 关注的人，主包 cmt 页签实证）。
+  Future<MessagePage<MessageComment>> getCommentsToMe({
+    String maxId = '',
+    String sinceId = '',
+    bool onlyFollowed = false,
+  }) async {
+    final page = await _messageList(
+      '/ajax/message/cmt',
+      'comments',
+      extra: {if (onlyFollowed) 'filter_by_author': 1},
+      maxId: maxId,
+      sinceId: sinceId,
+    );
+    return (
+      items: page.items
+          .map((e) => MessageComment.fromJson(_asMap(e)))
+          .where((c) => c.comment.id.isNotEmpty)
+          .toList(),
+      maxId: page.maxId,
+      sinceId: page.sinceId,
+      hasMore: page.hasMore,
+    );
+  }
+
+  /// 我发出的评论：GET /ajax/message/myCmt（主包 cmt 页签子项实证，
+  /// 与收到的评论同页签切换）。
+  Future<MessagePage<MessageComment>> getMyComments({
+    String maxId = '',
+    String sinceId = '',
+  }) async {
+    final page = await _messageList(
+      '/ajax/message/myCmt',
+      'comments',
+      maxId: maxId,
+      sinceId: sinceId,
+    );
+    return (
+      items: page.items
+          .map((e) => MessageComment.fromJson(_asMap(e)))
+          .where((c) => c.comment.id.isNotEmpty)
+          .toList(),
+      maxId: page.maxId,
+      sinceId: page.sinceId,
+      hasMore: page.hasMore,
+    );
+  }
+
+  /// 收到的赞：GET /ajax/message/attitudes。
+  Future<MessagePage<MessageLike>> getLikesToMe({
+    String maxId = '',
+    String sinceId = '',
+  }) async {
+    final page = await _messageList(
+      '/ajax/message/attitudes',
+      'attitudes',
+      maxId: maxId,
+      sinceId: sinceId,
+    );
+    return (
+      items: page.items
+          .map((e) => MessageLike.fromJson(_asMap(e)))
+          .where((l) => l.user != null || l.status != null)
+          .toList(),
+      maxId: page.maxId,
+      sinceId: page.sinceId,
+      hasMore: page.hasMore,
+    );
+  }
+
+  /// 消息未读汇总：GET /ajax/message/unreadHint + /ajax/message/summary
+  /// 多形态防御提取。本方法不抛错（徽标拉取失败只记诊断、返回已提取
+  /// 部分或全零），避免拖垮「我的」页与消息中心页签渲染。
+  ///
+  /// 依据等级：unreadHint 的 groups 形态（[{键: 数}]）与 summary 的
+  /// {summary:{topUsers/followers/field}} 形态为主包实证，但 summary
+  /// 那三个数是 24 小时互动量、不是分类未读，不往分类上映射；
+  /// 分类键名（mention_status/all_mention_cmt/cmt/attitude）为主包
+  /// 未读状态表实证，其数值在主包里来自独立的 remind 接口——
+  /// 期待它出现在 unreadHint/summary 响应里属推测防御，取不到即全零。
+  Future<MessageUnread> getMessageSummary() async {
+    final merged = <String, int>{};
+    void absorb(Map<String, dynamic> m) {
+      for (final e in m.entries) {
+        final v = _intOf(e.value);
+        if (v > 0) merged[e.key] = v;
+      }
+      for (final g in _asList(m['groups'])) {
+        absorb(_asMap(g));
+      }
+      absorb(_asMap(m['unread']));
+    }
+
+    try {
+      final hint = await _get(
+        WbStack.pc,
+        '$_pcBase/ajax/message/unreadHint',
+        referer: 'https://weibo.com/messages',
+      );
+      absorb(_asMap(hint['data']));
+      absorb(hint);
+    } catch (e) {
+      session.recordLoginFailure('/ajax/message/unreadHint', '$e');
+    }
+    try {
+      final sum = await _get(
+        WbStack.pc,
+        '$_pcBase/ajax/message/summary',
+        referer: 'https://weibo.com/messages',
+      );
+      absorb(_asMap(sum['data']));
+      absorb(_asMap(sum['summary']));
+      absorb(sum);
+    } catch (e) {
+      session.recordLoginFailure('/ajax/message/summary', '$e');
+    }
+    int pick(List<String> keys) {
+      for (final k in keys) {
+        final v = merged[k];
+        if (v != null && v > 0) return v;
+      }
+      return 0;
+    }
+
+    return MessageUnread(
+      mentionStatuses: pick(['mention_status']),
+      mentionComments: pick(['all_mention_cmt', 'mention_cmt']),
+      commentsToMe: pick(['cmt']),
+      likesToMe: pick(['attitude', 'attitudes']),
+      directMessages: pick(['dm_total', 'dm']),
+      serverTotal: pick(['messages', 'total']),
+    );
+  }
+
   // ---------------- 互动写操作（登录态） ----------------
 
   /// 通用 POST（写操作专用）：身份规则与 _get 相反——**只许登录态**。

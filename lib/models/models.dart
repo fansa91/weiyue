@@ -953,3 +953,210 @@ Map<String, String> parseEmoticonMap(Map<String, dynamic> data) {
   }
   return result;
 }
+
+// ---------------- 消息中心（登录态，/ajax/message 族） ----------------
+// 依据：WEIBO_API.md「登录与写接口」节静态确认路径 + PC 网页端主包
+// （raw/pc_index.js）消息页组件实证的信封/参数/条目结构。登录态真实
+// 返回未经真机实测，解析全部防御式，结构对不上的条目跳过不崩。
+
+/// 消息族列表的双游标分页结果：请求带 max_id + sinceId 两参
+/// （主包消息页组件实证），响应回传 next_cursor / nextId。
+typedef MessagePage<T> =
+    ({List<T> items, String maxId, String sinceId, bool hasMore});
+
+/// 消息未读汇总。分类键名来自主包未读状态表（mention_status /
+/// all_mention_cmt / cmt / attitude，主包实证）；数值由
+/// WeiyueService.getMessageSummary 多形态防御提取，全零即无徽标。
+class MessageUnread {
+  /// @我的微博未读（mention_status）
+  final int mentionStatuses;
+
+  /// @我的评论未读（all_mention_cmt）
+  final int mentionComments;
+
+  /// 收到的评论未读（cmt）
+  final int commentsToMe;
+
+  /// 收到的赞未读（attitude）
+  final int likesToMe;
+
+  /// 私信类未读（dm_total，防御字段）
+  final int directMessages;
+
+  /// 服务端给的总未读（messages 键）；0 表示未提供，total 退回本地求和
+  final int serverTotal;
+
+  const MessageUnread({
+    this.mentionStatuses = 0,
+    this.mentionComments = 0,
+    this.commentsToMe = 0,
+    this.likesToMe = 0,
+    this.directMessages = 0,
+    this.serverTotal = 0,
+  });
+
+  static const zero = MessageUnread();
+
+  /// @我的页签徽标（微博 + 评论）
+  int get mentions => mentionStatuses + mentionComments;
+
+  int get categoriesSum =>
+      mentions + commentsToMe + likesToMe + directMessages;
+
+  /// 「我的」入口总徽标：服务端总数优先，否则分类求和
+  int get total => serverTotal > 0 ? serverTotal : categoriesSum;
+}
+
+/// 「全部消息」混合流条目（/ajax/message/msgList?type=all，主包实证
+/// 语义是 24 小时全部消息而非私信会话）：条目 = {uuidTmp, create_time,
+/// userInfo, tips, msg_type, msgInfo}，msg_type 分段（主包
+/// handleAllMessage 实证）：1-2 状态类、3-6 评论类、7-9 赞类，
+/// msgInfo 是内嵌的状态/评论对象。
+enum MessageFeedKind { status, comment, like, other }
+
+class MessageFeedItem {
+  final String key;
+  final WbUser? actor;
+  final String actionText; // tips：服务端给的动作描述（如「评论了你的微博」）
+  final String createdAtRaw; // create_time
+  final MessageFeedKind kind;
+  final String text; // 主体文本（状态/评论正文）
+  final WbStatus? status; // 关联微博（点击跳详情）
+  final String commentText; // 赞类且赞的是评论时，被赞评论的文本
+
+  const MessageFeedItem({
+    required this.key,
+    this.actor,
+    this.actionText = '',
+    this.createdAtRaw = '',
+    this.kind = MessageFeedKind.other,
+    this.text = '',
+    this.status,
+    this.commentText = '',
+  });
+
+  /// 是否有可展示/可跳转的内容（全空条目由服务层过滤掉）。
+  bool get hasContent => actor != null || text.isNotEmpty || status != null;
+
+  factory MessageFeedItem.fromJson(Map<String, dynamic> j) {
+    final info = _mapOf(j['msgInfo']);
+    final userMap = _mapOf(j['userInfo']);
+    final type = _intOf(j['msg_type']);
+    final kind = (type == 1 || type == 2)
+        ? MessageFeedKind.status
+        : (type >= 3 && type <= 6)
+        ? MessageFeedKind.comment
+        : (type >= 7 && type <= 9)
+        ? MessageFeedKind.like
+        : MessageFeedKind.other;
+    WbStatus? status;
+    var text = '';
+    var commentText = '';
+    if (info.isNotEmpty) {
+      switch (kind) {
+        case MessageFeedKind.status:
+          final s = WbStatus.fromJson(info);
+          if (s.id.isNotEmpty) status = s;
+          text = s.text;
+        case MessageFeedKind.comment:
+          text = WbComment.fromJson(info).text;
+          final sm = _mapOf(info['status']);
+          if (sm.isNotEmpty) {
+            final s = WbStatus.fromJson(sm);
+            if (s.id.isNotEmpty) status = s;
+          }
+        case MessageFeedKind.like:
+          final inner = _mapOf(info['status']);
+          if (inner.isNotEmpty) {
+            // msgInfo 是被赞的评论：其 text 是评论文本，status 是所属微博
+            commentText = stripHtml(_strOf(info['text']));
+            final s = WbStatus.fromJson(inner);
+            if (s.id.isNotEmpty) status = s;
+          } else {
+            // msgInfo 本身就是被赞的微博
+            final s = WbStatus.fromJson(info);
+            if (s.id.isNotEmpty) {
+              status = s;
+              text = s.text;
+            }
+          }
+        case MessageFeedKind.other:
+          text = stripHtml(_strOf(info['text']));
+          final sm = _mapOf(info['status']);
+          if (sm.isNotEmpty) {
+            final s = WbStatus.fromJson(sm);
+            if (s.id.isNotEmpty) status = s;
+          }
+      }
+    }
+    return MessageFeedItem(
+      key: _strOf(j['uuidTmp'] ?? j['id']),
+      actor: userMap.isEmpty ? null : WbUser.fromJson(userMap),
+      actionText: _strOf(j['tips']),
+      createdAtRaw: _strOf(j['create_time'] ?? j['created_at']),
+      kind: kind,
+      text: text,
+      status: status,
+      commentText: commentText,
+    );
+  }
+}
+
+/// 消息评论条目（message/cmt、message/myCmt、comments/mentions 共用）：
+/// 评论本体复用 WbComment，另带它针对的微博与被回复的评论。
+class MessageComment {
+  final WbComment comment;
+  final WbStatus? status;
+  final WbComment? replyTo;
+
+  const MessageComment({required this.comment, this.status, this.replyTo});
+
+  factory MessageComment.fromJson(Map<String, dynamic> j) {
+    final statusMap = _mapOf(j['status']);
+    // 主包两种拼写都出现过：reply_comment（节点消息）/ replay_comment
+    // （混合流 msgInfo），两个都认。
+    final replyMap = _mapOf(j['reply_comment'] ?? j['replay_comment']);
+    return MessageComment(
+      comment: WbComment.fromJson(j),
+      status: statusMap.isEmpty ? null : WbStatus.fromJson(statusMap),
+      replyTo: replyMap.isEmpty ? null : WbComment.fromJson(replyMap),
+    );
+  }
+}
+
+/// 收到的赞条目（/ajax/message/attitudes，主包实证形态）：
+/// 条目带点赞者 user；赞微博时带 status，赞评论时带 comment，
+/// comment 内再带它所属的 status。
+class MessageLike {
+  final String id;
+  final WbUser? user;
+  final String createdAtRaw;
+  final WbStatus? status;
+  final String commentText; // 非空 = 赞的是这条评论
+
+  const MessageLike({
+    required this.id,
+    this.user,
+    this.createdAtRaw = '',
+    this.status,
+    this.commentText = '',
+  });
+
+  factory MessageLike.fromJson(Map<String, dynamic> j) {
+    final userMap = _mapOf(j['user']);
+    final commentMap = _mapOf(j['comment']);
+    var statusMap = _mapOf(j['status']);
+    var commentText = '';
+    if (commentMap.isNotEmpty) {
+      commentText = stripHtml(_strOf(commentMap['text']));
+      if (statusMap.isEmpty) statusMap = _mapOf(commentMap['status']);
+    }
+    return MessageLike(
+      id: _strOf(j['idstr'] ?? j['id']),
+      user: userMap.isEmpty ? null : WbUser.fromJson(userMap),
+      createdAtRaw: _strOf(j['created_at']),
+      status: statusMap.isEmpty ? null : WbStatus.fromJson(statusMap),
+      commentText: commentText,
+    );
+  }
+}
