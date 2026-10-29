@@ -84,6 +84,10 @@ class WbUser {
   final String coverImage;
   final String coverImagePhone;
 
+  /// 当前登录用户是否已关注此人（接口 user 对象自带 following 字段，
+  /// 访客态恒 false；关注/取关按钮的初始态来源）。
+  final bool following;
+
   const WbUser({
     required this.id,
     required this.screenName,
@@ -101,6 +105,7 @@ class WbUser {
     this.birthday = '',
     this.coverImage = '',
     this.coverImagePhone = '',
+    this.following = false,
   });
 
   /// 封面展示图：手机版封面优先，其次通用封面。
@@ -124,6 +129,7 @@ class WbUser {
     String? birthday,
     String? coverImage,
     String? coverImagePhone,
+    bool? following,
   }) {
     return WbUser(
       id: id ?? this.id,
@@ -142,6 +148,7 @@ class WbUser {
       birthday: birthday ?? this.birthday,
       coverImage: coverImage ?? this.coverImage,
       coverImagePhone: coverImagePhone ?? this.coverImagePhone,
+      following: following ?? this.following,
     );
   }
 
@@ -163,6 +170,7 @@ class WbUser {
     'birthday': birthday,
     'cover_image': coverImage,
     'cover_image_phone': coverImagePhone,
+    'following': following,
   };
 
   String get followersDisplay => followersCount > 0
@@ -190,6 +198,7 @@ class WbUser {
       birthday: _strOf(j['birthday']),
       coverImage: httpsUrl(_strOf(j['cover_image'])),
       coverImagePhone: httpsUrl(_strOf(j['cover_image_phone'])),
+      following: _boolOf(j['following']),
     );
   }
 }
@@ -345,6 +354,14 @@ class WbStatus {
   final int commentsCount;
   final int attitudesCount;
   final int readsCount;
+
+  /// 当前登录用户是否已赞此帖（接口 attitudes_status：0 未赞、非 0 已赞；
+  /// 访客态恒 false）。点赞按钮初始态与乐观更新的回滚基线。
+  final bool liked;
+
+  /// 当前登录用户是否已收藏此帖（接口 favorited 字段，抓包实证存在）。
+  final bool favorited;
+
   final List<WbPic> pics;
   final WbVideo? video;
   final bool isLongText;
@@ -373,6 +390,8 @@ class WbStatus {
     this.commentsCount = 0,
     this.attitudesCount = 0,
     this.readsCount = 0,
+    this.liked = false,
+    this.favorited = false,
     this.pics = const [],
     this.video,
     this.isLongText = false,
@@ -394,6 +413,11 @@ class WbStatus {
     String? textRaw,
     bool? isLongText,
     WbVideo? video,
+    int? repostsCount,
+    int? commentsCount,
+    int? attitudesCount,
+    bool? liked,
+    bool? favorited,
   }) {
     return WbStatus(
       id: id,
@@ -404,10 +428,12 @@ class WbStatus {
       createdAt: createdAt,
       createdAtRaw: createdAtRaw,
       source: source,
-      repostsCount: repostsCount,
-      commentsCount: commentsCount,
-      attitudesCount: attitudesCount,
+      repostsCount: repostsCount ?? this.repostsCount,
+      commentsCount: commentsCount ?? this.commentsCount,
+      attitudesCount: attitudesCount ?? this.attitudesCount,
       readsCount: readsCount,
+      liked: liked ?? this.liked,
+      favorited: favorited ?? this.favorited,
       pics: pics,
       video: video ?? this.video,
       isLongText: isLongText ?? this.isLongText,
@@ -573,6 +599,10 @@ class WbStatus {
       commentsCount: _intOf(j['comments_count']),
       attitudesCount: _intOf(j['attitudes_count']),
       readsCount: _intOf(j['reads_count']),
+      // attitudes_status：抓包实证字段（0 未赞；已赞为态度 id/类型值）。
+      // 个别形态另给 liked 布尔，一并兼容。
+      liked: _intOf(j['attitudes_status']) != 0 || _boolOf(j['liked']),
+      favorited: _boolOf(j['favorited']),
       pics: pics,
       video: video,
       isLongText: _boolOf(j['isLongText']),

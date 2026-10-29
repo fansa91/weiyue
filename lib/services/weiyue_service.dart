@@ -1459,4 +1459,224 @@ class WeiyueService {
       rethrow;
     }
   }
+
+  // ---------------- 互动写操作（登录态） ----------------
+
+  /// 通用 POST（写操作专用）：身份规则与 _get 相反——**只许登录态**。
+  /// - 无可用登录 Cookie：直接抛「请先登录」，绝不回退访客、
+  ///   绝不把写请求发给访客身份（一个字节都不发出去）；
+  /// - PC 栈必须带 `X-Xsrf-Token` 头（网页端写接口的硬性要求，
+  ///   文档「登录与写接口」节静态确认）：会话里没有令牌时抛可读错误，
+  ///   提示先修复登录态；
+  /// - 表单编码 application/x-www-form-urlencoded（与网页端一致）。
+  /// 成功判据：HTTP 200 且 ok 不为 0、且无 error/error_code 错误字段。
+  /// 失败时把服务端的 msg/error 文案原样提出来抛 WeiyueException，
+  /// 并记入登录诊断（recordLoginFailure，路径+消息）。
+  Future<Map<String, dynamic>> _post(
+    WbStack stack,
+    String url, {
+    required Map<String, dynamic> form,
+    String? referer,
+  }) async {
+    final path = Uri.parse(url).path;
+    if (!session.hasUsableCookie(stack)) {
+      session.recordLoginFailure(path, '请先登录');
+      throw const WeiyueException('请先登录');
+    }
+    if (stack == WbStack.pc) {
+      final xsrf = session.xsrfToken();
+      if (xsrf == null || xsrf.isEmpty) {
+        const msg = '缺少 XSRF 令牌，请先点「修复登录态」或重新登录';
+        session.recordLoginFailure(path, msg);
+        throw const WeiyueException(msg);
+      }
+    }
+    final cookie = session.cookieHeaderFor(stack)!;
+    final dio = stack == WbStack.pc ? _pc : _m;
+    final Response<dynamic> resp;
+    try {
+      resp = await dio.post<dynamic>(
+        url,
+        data: form,
+        options: Options(
+          contentType: Headers.formUrlEncodedContentType,
+          headers: _requestHeaders(
+            stack,
+            cookie: cookie,
+            useSession: true,
+            referer: referer,
+          ),
+        ),
+      );
+    } on DioException catch (e) {
+      final msg = '网络错误：${e.message ?? e.type.name}';
+      session.recordLoginFailure(path, msg);
+      throw WeiyueException(msg);
+    }
+    final status = resp.statusCode ?? 0;
+    final data = resp.data;
+    Map<String, dynamic>? json;
+    if (data is Map) json = _asMap(data);
+    final location = resp.headers.value('location') ?? '';
+    final rawBody = data is String ? data : '';
+    if (_notLoggedInSignal(status, json, location, rawBody)) {
+      session.markExpired();
+      const msg = '登录态已失效，请重新登录';
+      session.recordLoginFailure(path, msg);
+      throw const WeiyueException(msg);
+    }
+    if (json == null) {
+      final msg = '接口返回非 JSON（HTTP $status）';
+      session.recordLoginFailure(path, msg);
+      throw WeiyueException(msg);
+    }
+    final dataMap = _asMap(json['data']);
+    final errText = _firstErrorText([
+      json['msg'],
+      json['error'],
+      json['error_msg'],
+      dataMap['msg'],
+      dataMap['error'],
+    ]);
+    final okVal = json['ok'];
+    final okFailed = okVal == 0 || okVal == '0' || okVal == false;
+    final errVal = json['error'];
+    final hasErrField =
+        (errVal is String && errVal.trim().isNotEmpty) ||
+        json['error_code'] != null;
+    if (okFailed || hasErrField || status != 200) {
+      final msg = errText.isNotEmpty ? errText : '请求失败（HTTP $status）';
+      session.recordLoginFailure(path, msg);
+      throw WeiyueException(msg);
+    }
+    return json;
+  }
+
+  String _detailReferer(String id) => 'https://weibo.com/detail/$id';
+
+  /// 点赞：POST /ajax/statuses/setLike（文档写接口清单原文），参数 id。
+  /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
+  Future<void> likeStatus(String id) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/setLike',
+      form: {'id': id},
+      referer: _detailReferer(id),
+    );
+  }
+
+  /// 取消点赞：POST /ajax/statuses/cancelLike（文档清单原文），参数 id。
+  Future<void> unlikeStatus(String id) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/cancelLike',
+      form: {'id': id},
+      referer: _detailReferer(id),
+    );
+  }
+
+  /// 发评论：POST /ajax/comments/create（文档清单原文），
+  /// 参数 id（帖子）+ comment（正文）。成功响应可能是评论对象本体
+  /// （顶层或 data 内），能解析出评论就返回，解析不到返回 null
+  ///（调用方以刷新评论列表为准，不依赖此返回值）。
+  Future<WbComment?> createComment(String statusId, String text) async {
+    final json = await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/comments/create',
+      form: {'id': statusId, 'comment': text},
+      referer: _detailReferer(statusId),
+    );
+    return _parseCreatedComment(json);
+  }
+
+  /// 回复评论：POST /ajax/comments/reply（文档清单原文），
+  /// 参数 cid（被回复的评论 id）+ id（帖子）+ comment（正文）。
+  Future<WbComment?> replyComment({
+    required String statusId,
+    required String commentId,
+    required String text,
+  }) async {
+    final json = await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/comments/reply',
+      form: {'cid': commentId, 'id': statusId, 'comment': text},
+      referer: _detailReferer(statusId),
+    );
+    return _parseCreatedComment(json);
+  }
+
+  /// 从评论写接口的响应里防御式提取新建评论：依次找 data 本体 /
+  /// data.comment / 顶层本体 / 顶层 comment；id 与 text 都缺的视为无。
+  static WbComment? _parseCreatedComment(Map<String, dynamic> json) {
+    final data = _asMap(json['data']);
+    for (final candidate in [
+      data,
+      _asMap(data['comment']),
+      json,
+      _asMap(json['comment']),
+    ]) {
+      if (candidate.isEmpty) continue;
+      final c = WbComment.fromJson(candidate);
+      if (c.id.isNotEmpty) return c;
+    }
+    return null;
+  }
+
+  /// 转发：POST /ajax/statuses/repost（文档清单原文；同族另有
+  /// normal_repost，清单未区分语义，带转发语的对话框形态取 repost），
+  /// 参数 id + comment（转发语，可空串=无语转发）。
+  Future<void> repostStatus(String id, {String comment = ''}) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/repost',
+      form: {'id': id, 'comment': comment},
+      referer: _detailReferer(id),
+    );
+  }
+
+  /// 收藏（创建）：POST /ajax/favorites/create，参数 id。
+  /// ⚠️ **推测实现**：文档 favorites 族只列了 all_fav|show|tags，
+  /// 创建路径不在清单内；按族名+老 API 惯例推测为 favorites/create。
+  /// 调用收敛在此单点，路径若不对只改这一处。
+  Future<void> createFavorite(String id) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/favorites/create',
+      form: {'id': id},
+      referer: _detailReferer(id),
+    );
+  }
+
+  /// 取消收藏：POST /ajax/statuses/destoryFavorites
+  ///（文档原文拼写就是 destory），参数 id。
+  Future<void> destroyFavorite(String id) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/destoryFavorites',
+      form: {'id': id},
+      referer: _detailReferer(id),
+    );
+  }
+
+  /// 关注：POST /ajax/friendships/create（文档清单原文）。
+  /// 参数名清单未给：卡片关注按钮抓包参数为 uid、网页端惯例为
+  /// friend_id，两者同发（服务端忽略多余参数），收敛此单点便于修正。
+  Future<void> followUser(String uid) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/friendships/create',
+      form: {'friend_id': uid, 'uid': uid},
+      referer: 'https://weibo.com/u/$uid',
+    );
+  }
+
+  /// 取关：POST /ajax/friendships/destory（文档原文拼写），参数同关注。
+  Future<void> unfollowUser(String uid) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/friendships/destory',
+      form: {'friend_id': uid, 'uid': uid},
+      referer: 'https://weibo.com/u/$uid',
+    );
+  }
 }
