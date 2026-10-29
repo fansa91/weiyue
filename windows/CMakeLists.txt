@@ -32,6 +32,13 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+# flutter_inappwebview_windows 的原生代码经 C++/WinRT 头文件间接包含
+# <experimental/coroutine>，新版 MSVC STL 会以 STL1011 静态断言（C2338）
+# 报错。按 STL 报错原文的官方压制办法定义该宏；放在顶层且位于
+# add_subdirectory(flutter) 与 generated_plugins.cmake 之前，使目录级
+# 编译定义能覆盖到随后加入的全部插件目标。
+add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by
