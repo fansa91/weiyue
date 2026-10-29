@@ -3,9 +3,11 @@ import 'package:provider/provider.dart';
 
 import '../core/utils.dart';
 import '../models/models.dart';
+import '../services/session_service.dart';
 import '../services/settings_service.dart';
 import '../services/weiyue_service.dart';
 import '../widgets/detail_scaffold.dart';
+import '../widgets/interactions.dart';
 import '../widgets/long_image_viewer.dart';
 import '../widgets/network_image.dart';
 import '../widgets/responsive_status_list.dart';
@@ -29,6 +31,10 @@ class _ProfileScreenState extends State<ProfileScreen>
   String? _error;
   List<WbPlaylist> _playlists = const [];
 
+  /// 关注态：初始取 user.following，点击乐观切换、失败回滚。
+  bool _following = false;
+  bool _followBusy = false;
+
   @override
   void initState() {
     super.initState();
@@ -45,7 +51,12 @@ class _ProfileScreenState extends State<ProfileScreen>
     final svc = context.read<WeiyueService>();
     try {
       final user = await svc.getProfileInfo(widget.uid);
-      if (mounted) setState(() => _user = user);
+      if (mounted) {
+        setState(() {
+          _user = user;
+          _following = user.following;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
     }
@@ -53,6 +64,36 @@ class _ProfileScreenState extends State<ProfileScreen>
       final playlists = await svc.getVideoTab(widget.uid);
       if (mounted) setState(() => _playlists = playlists);
     } catch (_) {}
+  }
+
+  /// 关注/取关切换：乐观翻转本地状态，失败回滚并弹服务端消息；
+  /// 取关不加确认框（任务约定）。未登录只提示，不发请求。
+  Future<void> _toggleFollow() async {
+    if (_followBusy) return;
+    final user = _user;
+    if (user == null) return;
+    if (!ensureLoggedIn(context)) return;
+    final prev = _following;
+    setState(() {
+      _following = !prev;
+      _followBusy = true;
+    });
+    try {
+      final svc = context.read<WeiyueService>();
+      if (!prev) {
+        await svc.followUser('${user.id}');
+      } else {
+        await svc.unfollowUser('${user.id}');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _following = prev);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('$e')));
+    } finally {
+      if (mounted) setState(() => _followBusy = false);
+    }
   }
 
   void _showDetail() async {
@@ -129,13 +170,16 @@ class _ProfileScreenState extends State<ProfileScreen>
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final user = _user;
+    // 看的是本人主页时不显示关注按钮（关注自己无意义）
+    final session = context.watch<SessionService>();
+    final isSelf = session.uid.isNotEmpty && session.uid == widget.uid;
     return Scaffold(
       appBar: AppBar(title: Text(user?.screenName ?? '用户主页')),
       body: _error != null && user == null
           ? Center(child: Text(_error!))
           : NestedScrollView(
               headerSliverBuilder: (context, _) => [
-                SliverToBoxAdapter(child: _buildHeader(cs, user)),
+                SliverToBoxAdapter(child: _buildHeader(cs, user, isSelf: isSelf)),
                 SliverPersistentHeader(
                   pinned: true,
                   delegate: _TabBarDelegate(
@@ -240,7 +284,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  Widget _buildHeader(ColorScheme cs, WbUser? user) {
+  Widget _buildHeader(ColorScheme cs, WbUser? user, {bool isSelf = false}) {
     if (user == null) {
       return const SizedBox(
         height: 190,
@@ -303,6 +347,21 @@ class _ProfileScreenState extends State<ProfileScreen>
                           ),
                         ],
                         const Spacer(),
+                        if (!isSelf) ...[
+                          if (_following)
+                            OutlinedButton(
+                              onPressed: _followBusy ? null : _toggleFollow,
+                              style: _followBtnStyle,
+                              child: const Text('已关注'),
+                            )
+                          else
+                            FilledButton(
+                              onPressed: _followBusy ? null : _toggleFollow,
+                              style: _followBtnStyle,
+                              child: const Text('关注'),
+                            ),
+                          const SizedBox(width: 2),
+                        ],
                         TextButton(
                           onPressed: _showDetail,
                           child: const Text('资料'),
@@ -336,6 +395,14 @@ class _ProfileScreenState extends State<ProfileScreen>
       ],
     );
   }
+
+  static const _followBtnStyle = ButtonStyle(
+    visualDensity: VisualDensity.compact,
+    padding: WidgetStatePropertyAll(
+      EdgeInsets.symmetric(horizontal: 14, vertical: 0),
+    ),
+    textStyle: WidgetStatePropertyAll(TextStyle(fontSize: 13.5)),
+  );
 
   Widget _count(String label, int value) {
     return Padding(
