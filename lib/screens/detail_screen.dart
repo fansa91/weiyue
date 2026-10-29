@@ -7,6 +7,7 @@ import '../models/models.dart';
 import '../services/session_service.dart';
 import '../services/weiyue_service.dart';
 import '../widgets/inline_player.dart';
+import '../widgets/interactions.dart';
 import '../widgets/status_card.dart';
 import '../widgets/user_tile.dart';
 
@@ -213,6 +214,65 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
+  /// 重新拉评论第一页（发评论/回复成功后调用）：替换列表与游标，
+  /// 并把服务端总数同步进帖子（页签计数与底栏计数随之更新）。
+  Future<void> _reloadComments() async {
+    try {
+      final r = await context.read<WeiyueService>().getComments(
+        _status.id,
+        authorUid: '${_status.user?.id ?? ''}',
+      );
+      if (!mounted) return;
+      setState(() {
+        _comments = r.comments;
+        _commentTotal = r.total;
+        _commentMaxId = r.maxId;
+        _commentsLoading = false;
+        if (r.total > 0) _status = _status.copyWith(commentsCount: r.total);
+      });
+    } catch (_) {
+      // 刷新失败静默：刚发出的内容以服务端为准，下次进页会重新拉
+    }
+  }
+
+  void _snack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// 发评论（[replyTo] 为空）或回复某条评论：先过登录守卫，
+  /// 再开编辑框，成功后刷新评论列表。失败弹服务端消息。
+  Future<void> _composeComment({WbComment? replyTo}) async {
+    if (!ensureLoggedIn(context)) return;
+    final targetName = replyTo?.user?.screenName ?? '';
+    final text = await showWbComposer(
+      context,
+      title: replyTo == null ? '发表评论' : '回复评论',
+      hint: replyTo == null ? '说说你的看法…' : '回复 @$targetName…',
+      submitLabel: '发送',
+    );
+    if (text == null || !mounted) return;
+    final svc = context.read<WeiyueService>();
+    try {
+      if (replyTo == null) {
+        await svc.createComment(_status.id, text.trim());
+      } else {
+        await svc.replyComment(
+          statusId: _status.id,
+          commentId: replyTo.id,
+          text: text.trim(),
+        );
+      }
+      if (!mounted) return;
+      _snack(replyTo == null ? '评论已发表' : '回复已发送');
+      await _reloadComments();
+    } catch (e) {
+      _snack('$e');
+    }
+  }
+
   /// 帖子正文（窄屏与宽屏左栏共用）。视频帖在卡内封面位置
   /// 换成内嵌播放器，进入详情即按设置自动播放预览。
   List<Widget> _buildStatusOnly(BuildContext context) {
@@ -221,6 +281,10 @@ class _DetailScreenState extends State<DetailScreen> {
         status: _status,
         tappable: false,
         expanded: true,
+        onCommentTap: () => _composeComment(),
+        onStatusChanged: (s) {
+          if (mounted) setState(() => _status = s);
+        },
         videoOverride: _status.hasVideo
             ? InlineVideoPlayer(
                 key: ValueKey('inline-player-${_status.id}'),
@@ -492,7 +556,8 @@ class _DetailScreenState extends State<DetailScreen> {
             padding: EdgeInsets.all(24),
             child: Center(child: Text('暂无评论')),
           ),
-        for (final c in sorted) _CommentTile(comment: c),
+        for (final c in sorted)
+          _CommentTile(comment: c, onReply: (t) => _composeComment(replyTo: t)),
         if (hasMore)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
@@ -538,7 +603,11 @@ class _DetailScreenState extends State<DetailScreen> {
 
 class _CommentTile extends StatelessWidget {
   final WbComment comment;
-  const _CommentTile({required this.comment});
+
+  /// 点「回复」（含楼中楼里的回复）时回调，目标为被回复的那条评论。
+  final ValueChanged<WbComment>? onReply;
+
+  const _CommentTile({required this.comment, this.onReply});
 
   @override
   Widget build(BuildContext context) {
@@ -601,15 +670,39 @@ class _CommentTile extends StatelessWidget {
                 // 与正文共用富文本渲染：话题可点、表情短码渲染成图
                 WbRichText(comment.text, fontSize: 14.5),
                 const SizedBox(height: 3),
-                Text(
-                  [
-                    formatTimeAgo(
-                      parseWbTime(comment.createdAtRaw),
-                      fallback: comment.createdAtRaw,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        [
+                          formatTimeAgo(
+                            parseWbTime(comment.createdAtRaw),
+                            fallback: comment.createdAtRaw,
+                          ),
+                          if (comment.source.isNotEmpty) comment.source,
+                        ].join(' · '),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
                     ),
-                    if (comment.source.isNotEmpty) comment.source,
-                  ].join(' · '),
-                  style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                    if (onReply != null)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(4),
+                        onTap: () => onReply!(comment),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          child: Text(
+                            '回复',
+                            style: TextStyle(fontSize: 12.5, color: cs.primary),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 // 楼中楼：接口内嵌的 replies 缩进展示（无独立楼层接口，只这一层）
                 if (comment.replies.isNotEmpty) ...[
@@ -623,7 +716,8 @@ class _CommentTile extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        for (final r in comment.replies) _ReplyTile(reply: r),
+                        for (final r in comment.replies)
+                          _ReplyTile(reply: r, onReply: onReply),
                       ],
                     ),
                   ),
@@ -641,7 +735,11 @@ class _CommentTile extends StatelessWidget {
 /// 楼中楼单条回复（评论内嵌 comments 子列表项，缩进小字号）。
 class _ReplyTile extends StatelessWidget {
   final WbComment reply;
-  const _ReplyTile({required this.reply});
+
+  /// 点「回复」时回调，目标为本条回复自身。
+  final ValueChanged<WbComment>? onReply;
+
+  const _ReplyTile({required this.reply, this.onReply});
 
   @override
   Widget build(BuildContext context) {
@@ -679,12 +777,36 @@ class _ReplyTile extends StatelessWidget {
                 const SizedBox(height: 1),
                 WbRichText(reply.text, fontSize: 13.5),
                 const SizedBox(height: 2),
-                Text(
-                  formatTimeAgo(
-                    parseWbTime(reply.createdAtRaw),
-                    fallback: reply.createdAtRaw,
-                  ),
-                  style: TextStyle(fontSize: 11.5, color: cs.onSurfaceVariant),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        formatTimeAgo(
+                          parseWbTime(reply.createdAtRaw),
+                          fallback: reply.createdAtRaw,
+                        ),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    if (onReply != null)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(4),
+                        onTap: () => onReply!(reply),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          child: Text(
+                            '回复',
+                            style: TextStyle(fontSize: 12, color: cs.primary),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),

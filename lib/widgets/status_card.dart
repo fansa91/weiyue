@@ -13,6 +13,7 @@ import '../models/models.dart';
 import '../services/download_service.dart';
 import 'cover_image.dart';
 import 'download_button.dart';
+import 'interactions.dart';
 import 'long_image_viewer.dart';
 import 'network_image.dart';
 
@@ -135,6 +136,13 @@ class StatusCard extends StatelessWidget {
   /// 视频封面「下载视频」用的下载服务覆盖（测试注入；默认共享实例）。
   final DownloadService? downloadService;
 
+  /// 详情页用：底栏评论按钮改为打开评论编辑框（不传时随整卡进详情）。
+  final VoidCallback? onCommentTap;
+
+  /// 底栏互动（点赞/收藏/转发）成功后回传本地最新快照，
+  /// 详情页据此同步页签计数；列表卡可不传。
+  final ValueChanged<WbStatus>? onStatusChanged;
+
   const StatusCard({
     super.key,
     required this.status,
@@ -142,6 +150,8 @@ class StatusCard extends StatelessWidget {
     this.expanded = false,
     this.videoOverride,
     this.downloadService,
+    this.onCommentTap,
+    this.onStatusChanged,
   });
 
   @override
@@ -249,17 +259,14 @@ class StatusCard extends StatelessWidget {
                 _VideoCover(status: status, downloadService: downloadService),
           ],
           const SizedBox(height: 6),
-          // 底栏计数
+          // 底栏互动区：转发/评论/点赞/收藏（可点，乐观更新，见
+          // widgets/interactions.dart 的 StatusActionBar）
           Row(
             children: [
-              _CountItem(icon: Icons.repeat, count: status.repostsCount),
-              _CountItem(
-                icon: Icons.mode_comment_outlined,
-                count: status.commentsCount,
-              ),
-              _CountItem(
-                icon: Icons.favorite_border,
-                count: status.attitudesCount,
+              StatusActionBar(
+                status: status,
+                onCommentTap: onCommentTap,
+                onStatusChanged: onStatusChanged,
               ),
               const Spacer(),
               if (status.readsCount > 0)
@@ -298,31 +305,6 @@ class StatusCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         onTap: () => openDetail(context, status),
         child: card,
-      ),
-    );
-  }
-}
-
-class _CountItem extends StatelessWidget {
-  final IconData icon;
-  final int count;
-  const _CountItem({required this.icon, required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(right: 28),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 18, color: cs.onSurfaceVariant),
-          const SizedBox(width: 5),
-          Text(
-            count > 0 ? formatPlayCount(count) : '0',
-            style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
-          ),
-        ],
       ),
     );
   }
