@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
@@ -20,10 +21,20 @@ Future<void> clearWebViewCookies() async {
 /// 都走官方流程，本应用不接触账号密码），点「完成」后收割各相关域的
 /// Cookie 存入本地会话，并探活两栈解锁状态。
 ///
+/// 点「完成」收割前会先让 WebView 访问一次桌面端站点：移动端登录态
+/// 不会自动给 weibo.com 域种 Cookie（域隔离），passport 会话需经这次
+/// 访问 SSO 跨域登录并种下 PC 域 Cookie（含 XSRF-TOKEN），否则桌面端
+/// 接口整栈不可用（真机实证）。
+///
+/// [startOnPcSite]=true 为「修复登录态」模式：初始直接打开桌面端站点，
+/// passport 会话还在时会自动跨域登录，用户点「完成」即可重新收割探活。
+///
 /// 平台：flutter_inappwebview 覆盖 Android / iOS / macOS / Windows；
 /// 其他平台（如 Linux）无实现，页面直接提示不支持。
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final bool startOnPcSite;
+
+  const LoginScreen({super.key, this.startOnPcSite = false});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -63,6 +74,15 @@ class _LoginScreenState extends State<LoginScreen> {
   InAppWebViewController? _controller;
   bool _harvesting = false;
   bool _onPcSite = false;
+
+  /// 收割前等桌面端站点加载结束的信号（超时/出错也放行继续收割）。
+  Completer<void>? _pcVisitWaiter;
+
+  @override
+  void initState() {
+    super.initState();
+    _onPcSite = widget.startOnPcSite;
+  }
 
   /// 首屏加载进度（0-100）；页面加载出错时展示错误面板而非白屏。
   int _progress = 0;
@@ -107,12 +127,40 @@ class _LoginScreenState extends State<LoginScreen> {
     return byKey.values.toList();
   }
 
+  /// 收割前先访问一次桌面端站点并等它加载结束（超时 15 秒也继续）：
+  /// passport 会话借这次访问 SSO 跨域登录到 weibo.com 并种下该域
+  /// Cookie，之后的收割才能拿到完整的 PC 域登录态。
+  Future<void> _visitPcHome() async {
+    final controller = _controller;
+    if (controller == null) return;
+    final waiter = Completer<void>();
+    _pcVisitWaiter = waiter;
+    try {
+      await controller.loadUrl(urlRequest: URLRequest(url: WebUri(_pcHome)));
+      await waiter.future.timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {},
+      );
+    } catch (_) {
+      // 加载异常不挡收割：探活会给出真实结论
+    } finally {
+      if (identical(_pcVisitWaiter, waiter)) _pcVisitWaiter = null;
+    }
+  }
+
+  void _completePcVisit() {
+    final waiter = _pcVisitWaiter;
+    if (waiter != null && !waiter.isCompleted) waiter.complete();
+  }
+
   Future<void> _finish() async {
     if (_harvesting) return;
     final session = context.read<SessionService>();
     final svc = context.read<WeiyueService>();
     setState(() => _harvesting = true);
     try {
+      // 先跨域一跳种下 weibo.com 域 Cookie，再收割（顺序不能反）
+      await _visitPcHome();
       final cookies = await _harvestCookies();
       final store = SessionService.buildStore(cookies);
       if (!SessionService.storeHasSub(store)) {
@@ -152,7 +200,7 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('账号登录'),
+        title: Text(widget.startOnPcSite ? '修复登录态' : '账号登录'),
         actions: [
           if (_supported && !_onPcSite)
             TextButton(
@@ -180,7 +228,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Stack(
                     children: [
                       InAppWebView(
-                        initialUrlRequest: URLRequest(url: WebUri(_mHome)),
+                        initialUrlRequest: URLRequest(
+                          url: WebUri(
+                            widget.startOnPcSite ? _pcHome : _mHome,
+                          ),
+                        ),
                         initialSettings: InAppWebViewSettings(
                           javaScriptEnabled: true,
                           domStorageEnabled: true,
@@ -197,11 +249,13 @@ class _LoginScreenState extends State<LoginScreen> {
                         onLoadStart: (_, _) {
                           if (mounted) setState(() => _loadError = null);
                         },
+                        onLoadStop: (_, _) => _completePcVisit(),
                         onProgressChanged: (_, progress) {
                           if (mounted) setState(() => _progress = progress);
                         },
                         onReceivedError: (_, request, error) {
                           if (!(request.isForMainFrame ?? false)) return;
+                          _completePcVisit();
                           if (mounted) {
                             setState(() {
                               _loadError =
@@ -231,15 +285,19 @@ class _LoginScreenState extends State<LoginScreen> {
                     ],
                   ),
                 ),
-                const SafeArea(
+                SafeArea(
                   top: false,
                   child: Padding(
-                    padding: EdgeInsets.fromLTRB(16, 8, 16, 10),
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
                     child: Text(
-                      '请在页面内点「登录」走官方流程（账号 / 短信 / 扫码均可），'
-                      '登录成功后点右上角「完成」。若移动端登录后桌面端未解锁，'
-                      '可再用「桌面端登录页」补登一次。',
-                      style: TextStyle(fontSize: 12.5),
+                      widget.startOnPcSite
+                          ? '正在修复桌面端登录态：页面打开后若已自动登录，'
+                                '直接点右上角「完成」重新保存即可；若显示未登录，'
+                                '先在页面内完成登录再点「完成」。'
+                          : '请在页面内点「登录」走官方流程（账号 / 短信 / 扫码均可），'
+                                '登录成功后点右上角「完成」——完成时应用会先打开一次'
+                                '桌面端站点完成跨域登录，再保存登录状态。',
+                      style: const TextStyle(fontSize: 12.5),
                     ),
                   ),
                 ),

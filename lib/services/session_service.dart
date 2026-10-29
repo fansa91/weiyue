@@ -21,6 +21,73 @@ class HarvestedCookie {
   });
 }
 
+/// 一次探活的诊断快照（只含布尔标记与时间，绝不含 Cookie/令牌值）。
+class ProbeDiagnostic {
+  final int timeMs;
+  final bool? pcUnlocked;
+  final bool? mUnlocked;
+  final bool hasUid;
+  final bool hasXsrf;
+
+  const ProbeDiagnostic({
+    required this.timeMs,
+    required this.pcUnlocked,
+    required this.mUnlocked,
+    required this.hasUid,
+    required this.hasXsrf,
+  });
+
+  Map<String, dynamic> toJson() => {
+    't': timeMs,
+    'pc': pcUnlocked,
+    'm': mUnlocked,
+    'uid': hasUid,
+    'xsrf': hasXsrf,
+  };
+
+  static ProbeDiagnostic? fromJson(Map<dynamic, dynamic> j) {
+    final t = j['t'];
+    if (t is! num) return null;
+    return ProbeDiagnostic(
+      timeMs: t.toInt(),
+      pcUnlocked: j['pc'] is bool ? j['pc'] as bool : null,
+      mUnlocked: j['m'] is bool ? j['m'] as bool : null,
+      hasUid: j['uid'] == true,
+      hasXsrf: j['xsrf'] == true,
+    );
+  }
+}
+
+/// 一条登录类接口的失败记录（接口路径 + 错误消息，绝不含 Cookie/令牌值）。
+class LoginApiFailure {
+  final int timeMs;
+  final String endpoint;
+  final String message;
+
+  const LoginApiFailure({
+    required this.timeMs,
+    required this.endpoint,
+    required this.message,
+  });
+
+  Map<String, dynamic> toJson() => {
+    't': timeMs,
+    'endpoint': endpoint,
+    'message': message,
+  };
+
+  static LoginApiFailure? fromJson(Map<dynamic, dynamic> j) {
+    final t = j['t'];
+    final endpoint = '${j['endpoint'] ?? ''}';
+    if (t is! num || endpoint.isEmpty) return null;
+    return LoginApiFailure(
+      timeMs: t.toInt(),
+      endpoint: endpoint,
+      message: '${j['message'] ?? ''}',
+    );
+  }
+}
+
 /// 登录会话：WebView 官方登录后收割的 Cookie 整表、当前用户信息与两栈探活结果。
 ///
 /// 安全约束（硬性）：
@@ -33,6 +100,7 @@ class SessionService extends ChangeNotifier {
   static const _keyProbe = 'weiyue_session_probe_v1';
   static const _keyExpired = 'weiyue_session_expired_v1';
   static const _keyProfile = 'weiyue_session_profile_v1';
+  static const _keyDiag = 'weiyue_session_diag_v1';
 
   /// domain -> {name: value}
   Map<String, Map<String, String>> _cookies = {};
@@ -48,6 +116,10 @@ class SessionService extends ChangeNotifier {
   bool? _mUnlocked;
   bool _expired = false;
   bool _loaded = false;
+
+  /// 登录诊断：最近一次探活快照 + 最近几次登录类接口失败（新→旧，最多 5 条）。
+  ProbeDiagnostic? _lastProbe;
+  final List<LoginApiFailure> _failures = [];
 
   /// 是否存有登录会话（任一域下有非空 SUB 即算）。
   bool get isLoggedIn =>
@@ -65,6 +137,82 @@ class SessionService extends ChangeNotifier {
 
   /// 本人完整资料（未补拉到为 null）。
   WbUser? get profile => _profile;
+
+  /// 最近一次探活的诊断快照（未探活过为 null）。
+  ProbeDiagnostic? get lastProbeDiagnostic => _lastProbe;
+
+  /// 最近几次登录类接口失败（新→旧），供诊断面板展示。
+  List<LoginApiFailure> get recentLoginFailures =>
+      List.unmodifiable(_failures);
+
+  /// PC 栈的 XSRF-TOKEN Cookie 值：请求层组装 `X-Xsrf-Token` 头用
+  /// （网页端每个 ajax 请求都带该头，缺失时多个接口回 HTTP 400）。
+  /// 只查 weibo.com 域、排除 passport 域；无则 null。
+  /// 令牌值只允许流向请求头，绝不进 UI/日志/诊断记录。
+  String? xsrfToken() {
+    for (final entry in _cookies.entries) {
+      if (_isPassportDomain(entry.key)) continue;
+      if (!_domainMatches(entry.key, 'weibo.com')) continue;
+      final v = entry.value['XSRF-TOKEN'];
+      if (v != null && v.isNotEmpty) return v;
+    }
+    return null;
+  }
+
+  /// 会话里有没有 XSRF 令牌（诊断面板用，只暴露布尔，不暴露值）。
+  bool get hasXsrfToken => xsrfToken() != null;
+
+  /// 记录一次探活结论（WeiyueService.probeSession 末尾调用）。
+  void recordProbeResult({
+    bool? pcUnlocked,
+    bool? mUnlocked,
+    required bool hasUid,
+  }) {
+    _lastProbe = ProbeDiagnostic(
+      timeMs: DateTime.now().millisecondsSinceEpoch,
+      pcUnlocked: pcUnlocked,
+      mUnlocked: mUnlocked,
+      hasUid: hasUid,
+      hasXsrf: hasXsrfToken,
+    );
+    _persistDiag();
+    notifyListeners();
+  }
+
+  /// 记录一次登录类接口失败（路径 + 错误消息；与最近一条完全相同则不重复记）。
+  void recordLoginFailure(String endpoint, String message) {
+    final msg = message.length > 200 ? message.substring(0, 200) : message;
+    if (_failures.isNotEmpty &&
+        _failures.first.endpoint == endpoint &&
+        _failures.first.message == msg) {
+      return;
+    }
+    _failures.insert(
+      0,
+      LoginApiFailure(
+        timeMs: DateTime.now().millisecondsSinceEpoch,
+        endpoint: endpoint,
+        message: msg,
+      ),
+    );
+    while (_failures.length > 5) {
+      _failures.removeLast();
+    }
+    _persistDiag();
+    notifyListeners();
+  }
+
+  /// 诊断数据落盘（异步、失败静默：诊断不能反过来影响主流程）。
+  void _persistDiag() {
+    final payload = jsonEncode({
+      'probe': _lastProbe?.toJson(),
+      'failures': _failures.map((f) => f.toJson()).toList(),
+    });
+    final fut = SharedPreferences.getInstance();
+    fut.then((prefs) {
+      prefs.setString(_keyDiag, payload);
+    }, onError: (_) {});
+  }
 
   static String normalizeDomain(String raw) {
     var d = raw.trim().toLowerCase();
@@ -172,6 +320,26 @@ class SessionService extends ChangeNotifier {
         }
       } catch (_) {}
     }
+    final diagRaw = prefs.getString(_keyDiag);
+    if (diagRaw != null && diagRaw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(diagRaw);
+        if (decoded is Map) {
+          final probe = decoded['probe'];
+          if (probe is Map) _lastProbe = ProbeDiagnostic.fromJson(probe);
+          final fails = decoded['failures'];
+          if (fails is List) {
+            _failures.clear();
+            for (final f in fails) {
+              if (f is Map) {
+                final parsed = LoginApiFailure.fromJson(f);
+                if (parsed != null) _failures.add(parsed);
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
     _expired = prefs.getBool(_keyExpired) ?? false;
   }
 
@@ -258,12 +426,15 @@ class SessionService extends ChangeNotifier {
     _pcUnlocked = null;
     _mUnlocked = null;
     _expired = false;
+    _lastProbe = null;
+    _failures.clear();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyCookies);
     await prefs.remove(_keyUser);
     await prefs.remove(_keyProbe);
     await prefs.remove(_keyExpired);
     await prefs.remove(_keyProfile);
+    await prefs.remove(_keyDiag);
     notifyListeners();
   }
 }

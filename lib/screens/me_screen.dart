@@ -27,6 +27,7 @@ class MeScreen extends StatefulWidget {
 class _MeScreenState extends State<MeScreen> {
   bool _refreshing = false;
   bool _profileLoading = false;
+  bool _probing = false;
 
   /// 已自动补拉过资料的 uid（失败后不反复自动重试，靠手动刷新入口）。
   String _autoProfileUid = '';
@@ -55,6 +56,54 @@ class _MeScreenState extends State<MeScreen> {
     await Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (_) => const LoginScreen()));
+  }
+
+  /// 修复登录态：复用登录页但初始直接打开桌面端站点——passport 会话
+  /// 还在时会自动跨域登录，用户点「完成」即重新收割 + 探活。
+  Future<void> _openRepairLogin() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const LoginScreen(startOnPcSite: true),
+      ),
+    );
+  }
+
+  /// 重新检测：重跑探活并把结论存回会话（探活内部同时写诊断快照）。
+  Future<void> _reprobe() async {
+    if (_probing) return;
+    setState(() => _probing = true);
+    final session = context.read<SessionService>();
+    try {
+      final probe = await context.read<WeiyueService>().probeSession();
+      await session.saveProbe(
+        uid: probe.user != null ? '${probe.user!.id}' : '',
+        screenName: probe.user?.screenName ?? '',
+        avatar: probe.user?.avatar ?? '',
+        pcUnlocked: probe.pcUnlocked,
+        mUnlocked: probe.mUnlocked,
+      );
+      if (!probe.pcUnlocked && !probe.mUnlocked) {
+        session.markExpired();
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '检测完成：桌面端${probe.pcUnlocked ? '已解锁' : '未解锁'}，'
+              '移动端${probe.mUnlocked ? '已解锁' : '未解锁'}',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('检测失败：$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _probing = false);
+    }
   }
 
   Future<void> _logout() async {
@@ -167,6 +216,16 @@ class _MeScreenState extends State<MeScreen> {
                       total: session.profile?.friendsCount ?? 0,
                     ),
             ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            ListTile(
+              leading: const Icon(Icons.build_outlined),
+              title: const Text('修复登录态'),
+              subtitle: const Text('桌面端未解锁时，重新跨域登录并收割'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _openRepairLogin,
+            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            _buildDiagnostics(context, session),
             const Divider(height: 1, indent: 16, endIndent: 16),
           ],
           // 访客状态卡（登录后作为回退身份保留）
@@ -633,6 +692,101 @@ class _MeScreenState extends State<MeScreen> {
         Text(
           has ? '已就绪 · ${formatDate(identity!.updatedAt)} 更新' : '未获取',
           style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+
+
+  String _fmtDiagTime(int ms) {
+    if (ms <= 0) return '';
+    final dt = DateTime.fromMillisecondsSinceEpoch(ms);
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${dt.month}-${dt.day} ${two(dt.hour)}:${two(dt.minute)}';
+  }
+
+  /// 登录诊断（已登录区）：最近一次探活快照（时间/两栈解锁/uid 有无/
+  /// XSRF 有无）+ 最近登录类接口失败记录 + 重新检测按钮。
+  /// 只展示布尔与错误消息，绝不含 Cookie/令牌值——用户截图即可作实证。
+  Widget _buildDiagnostics(BuildContext context, SessionService session) {
+    final cs = Theme.of(context).colorScheme;
+    final diag = session.lastProbeDiagnostic;
+    final failures = session.recentLoginFailures;
+    String unlockText(bool? v) => switch (v) {
+      true => '已解锁',
+      false => '未解锁',
+      null => '未检测',
+    };
+    Widget row(String label, String value) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 92,
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+            ),
+          ),
+          Expanded(child: Text(value, style: const TextStyle(fontSize: 13))),
+        ],
+      ),
+    );
+    return ExpansionTile(
+      leading: const Icon(Icons.fact_check_outlined),
+      title: const Text('登录诊断'),
+      childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      children: [
+        if (diag == null)
+          row('最近检测', '尚未检测')
+        else ...[
+          row('最近检测', _fmtDiagTime(diag.timeMs)),
+          row('桌面端接口', unlockText(diag.pcUnlocked)),
+          row('移动端接口', unlockText(diag.mUnlocked)),
+          row('用户 ID', diag.hasUid ? '已获取' : '未获取'),
+          row('XSRF 令牌', diag.hasXsrf ? '有' : '无'),
+        ],
+        row('当前令牌', session.hasXsrfToken ? '有' : '无'),
+        const SizedBox(height: 6),
+        const Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            '最近失败记录',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+        ),
+        if (failures.isEmpty)
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text('暂无失败记录', style: TextStyle(fontSize: 13)),
+          )
+        else
+          for (final f in failures)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '${f.endpoint}：${f.message}'
+                  '（${_fmtDiagTime(f.timeMs)}）',
+                  style: const TextStyle(fontSize: 12.5),
+                ),
+              ),
+            ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: FilledButton.tonal(
+            onPressed: _probing ? null : _reprobe,
+            child: _probing
+                ? const SizedBox(
+                    width: 15,
+                    height: 15,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('重新检测'),
+          ),
         ),
       ],
     );

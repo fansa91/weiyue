@@ -101,6 +101,33 @@ class WeiyueService {
     return (cookie: identity.cookie, useSession: false);
   }
 
+  /// 组装请求头。PC 栈用登录 Cookie 时必须带 `X-Xsrf-Token` 头
+  /// （值 = 会话里的 XSRF-TOKEN Cookie，网页端每个 ajax 请求都带）：
+  /// 缺失时多个接口直接回 HTTP 400 非 JSON（真机实证：关注列表等）。
+  /// 访客请求永不带、m 栈不带，保持既有行为不变。
+  Map<String, String> _requestHeaders(
+    WbStack stack, {
+    required String cookie,
+    required bool useSession,
+    String? referer,
+  }) {
+    final headers = <String, String>{
+      'User-Agent': visitor.uaOf(stack),
+      'Referer':
+          referer ??
+          (stack == WbStack.pc ? 'https://weibo.com/' : 'https://m.weibo.cn/'),
+      'X-Requested-With': 'XMLHttpRequest',
+      'Cookie': cookie,
+    };
+    if (stack == WbStack.pc && useSession) {
+      final xsrf = session.xsrfToken();
+      if (xsrf != null && xsrf.isNotEmpty) {
+        headers['X-Xsrf-Token'] = xsrf;
+      }
+    }
+    return headers;
+  }
+
   /// 通用 GET：身份处理见类注释；失效时只重试一次。
   /// [sessionOnly]=true 时不回退访客（登录探活专用）。
   Future<Map<String, dynamic>> _get(
@@ -123,16 +150,12 @@ class WeiyueService {
         url,
         queryParameters: query,
         options: Options(
-          headers: {
-            'User-Agent': visitor.uaOf(stack),
-            'Referer':
-                referer ??
-                (stack == WbStack.pc
-                    ? 'https://weibo.com/'
-                    : 'https://m.weibo.cn/'),
-            'X-Requested-With': 'XMLHttpRequest',
-            'Cookie': picked.cookie,
-          },
+          headers: _requestHeaders(
+            stack,
+            cookie: picked.cookie,
+            useSession: picked.useSession,
+            referer: referer,
+          ),
         ),
       );
     } on DioException catch (e) {
@@ -186,16 +209,12 @@ class WeiyueService {
         queryParameters: query,
         options: Options(
           responseType: ResponseType.plain,
-          headers: {
-            'User-Agent': visitor.uaOf(stack),
-            'Referer':
-                referer ??
-                (stack == WbStack.pc
-                    ? 'https://weibo.com/'
-                    : 'https://m.weibo.cn/'),
-            'X-Requested-With': 'XMLHttpRequest',
-            'Cookie': picked.cookie,
-          },
+          headers: _requestHeaders(
+            stack,
+            cookie: picked.cookie,
+            useSession: picked.useSession,
+            referer: referer,
+          ),
         ),
       );
     } on DioException catch (e) {
@@ -558,19 +577,24 @@ class WeiyueService {
   /// 不影响主资料返回。
   /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
   Future<WbUser> getMyProfile(String uid) async {
-    var user = await getProfileInfo(uid);
     try {
-      final detail = await getProfileDetail(uid);
-      final gender = '${detail['gender'] ?? ''}';
-      final birthday = '${detail['birthday'] ?? ''}';
-      user = user.copyWith(
-        gender: gender.isNotEmpty ? gender : user.gender,
-        birthday: birthday.isNotEmpty ? birthday : user.birthday,
-      );
-    } catch (_) {
-      // detail 失败只少两个扩展字段，主资料照常
+      var user = await getProfileInfo(uid);
+      try {
+        final detail = await getProfileDetail(uid);
+        final gender = '${detail['gender'] ?? ''}';
+        final birthday = '${detail['birthday'] ?? ''}';
+        user = user.copyWith(
+          gender: gender.isNotEmpty ? gender : user.gender,
+          birthday: birthday.isNotEmpty ? birthday : user.birthday,
+        );
+      } catch (_) {
+        // detail 失败只少两个扩展字段，主资料照常
+      }
+      return user;
+    } catch (e) {
+      session.recordLoginFailure('/ajax/profile/info', '$e');
+      rethrow;
     }
-    return user;
   }
 
   /// m 容器泛型请求，返回 data
@@ -1113,7 +1137,9 @@ class WeiyueService {
       );
       user = _parseCurrentUser(json);
       pcOk = user != null;
-    } catch (_) {}
+    } catch (e) {
+      session.recordLoginFailure('/ajax/setting/getBasicInfo', '$e');
+    }
     if (user == null) {
       try {
         final json = await _get(
@@ -1123,7 +1149,9 @@ class WeiyueService {
         );
         user = _parseCurrentUser(json);
         pcOk = user != null;
-      } catch (_) {}
+      } catch (e) {
+        session.recordLoginFailure('/ajax/profile/info', '$e');
+      }
     }
     if (!pcOk) {
       try {
@@ -1134,7 +1162,9 @@ class WeiyueService {
           sessionOnly: true,
         );
         pcOk = true;
-      } catch (_) {}
+      } catch (e) {
+        session.recordLoginFailure('/ajax/feed/friendstimeline', '$e');
+      }
     }
     var mOk = false;
     try {
@@ -1145,7 +1175,9 @@ class WeiyueService {
         sessionOnly: true,
       );
       mOk = true;
-    } catch (_) {}
+    } catch (e) {
+      session.recordLoginFailure('/api/statuses/repostTimeline', '$e');
+    }
     // 探活末尾顺带补拉本人完整资料并持久化（资料头展示用）；
     // 补拉失败不影响探活结论，账号区回退简版展示后可再自动/手动重拉。
     if (user != null && user.id > 0) {
@@ -1154,6 +1186,11 @@ class WeiyueService {
         await session.saveProfile(full);
       } catch (_) {}
     }
+    session.recordProbeResult(
+      pcUnlocked: pcOk,
+      mUnlocked: mOk,
+      hasUid: user != null && user.id > 0,
+    );
     return (user: user, pcUnlocked: pcOk, mUnlocked: mOk);
   }
 
@@ -1216,31 +1253,70 @@ class WeiyueService {
   }
 
   /// 我的收藏（登录后可用）：/ajax/favorites/all_fav（文档 favorites 族）。
-  /// 登录态结构未实测，防御解析：条目依次找 data.list / 顶层 list，
-  /// 单条若带 status 子对象则解包，否则按帖子对象直接解析。
+  /// 登录态真实结构未经实测，解析尽量加宽：条目依次找 data 直接为数组 /
+  /// data.fav_list / data.statuses / data.list / 顶层 favorites / 顶层 list；
+  /// 单条解包依次试 status / fav / mblog 子对象，否则按帖子对象直接解析。
+  /// 服务端带错误信息回空（ok=0 或 msg/error）时把消息抛给收藏页展示，
+  /// 不再静默吞成空列表；真空收藏（无错误信息）仍返回空列表走空态。
   Future<({List<WbStatus> items, int total})> getFavorites({
     int page = 1,
   }) async {
-    final json = await _get(
-      WbStack.pc,
-      '$_pcBase/ajax/favorites/all_fav',
-      query: {'page': page},
-    );
-    final data = _asMap(json['data']);
-    var raw = _asList(data['list']);
-    if (raw.isEmpty) raw = _asList(json['list']);
-    final items = <WbStatus>[];
-    for (final e in raw) {
-      final em = _asMap(e);
-      final inner = _asMap(em['status']);
-      final s = WbStatus.fromJson(inner.isNotEmpty ? inner : em);
-      if (s.id.isNotEmpty) items.add(s);
+    try {
+      final json = await _get(
+        WbStack.pc,
+        '$_pcBase/ajax/favorites/all_fav',
+        query: {'page': page},
+      );
+      final data = _asMap(json['data']);
+      var raw = _asList(json['data']);
+      if (raw.isEmpty) raw = _asList(data['fav_list']);
+      if (raw.isEmpty) raw = _asList(data['statuses']);
+      if (raw.isEmpty) raw = _asList(data['list']);
+      if (raw.isEmpty) raw = _asList(json['favorites']);
+      if (raw.isEmpty) raw = _asList(json['list']);
+      final items = <WbStatus>[];
+      for (final e in raw) {
+        final em = _asMap(e);
+        var inner = _asMap(em['status']);
+        if (inner.isEmpty) inner = _asMap(em['fav']);
+        if (inner.isEmpty) inner = _asMap(em['mblog']);
+        final s = WbStatus.fromJson(inner.isNotEmpty ? inner : em);
+        if (s.id.isNotEmpty) items.add(s);
+      }
+      if (items.isEmpty) {
+        final msg = _firstErrorText([
+          json['msg'],
+          json['error'],
+          data['msg'],
+          data['error'],
+        ]);
+        final okVal = json['ok'];
+        if (okVal == 0 || okVal == '0' || msg.isNotEmpty) {
+          throw WeiyueException(
+            msg.isNotEmpty ? msg : '收藏接口返回错误（ok=0）',
+          );
+        }
+      }
+      final totalRaw =
+          data['total_number'] ??
+          json['total_number'] ??
+          data['total'] ??
+          json['total'];
+      final total = _intOf(totalRaw);
+      return (items: items, total: total > 0 ? total : items.length);
+    } catch (e) {
+      session.recordLoginFailure('/ajax/favorites/all_fav', '$e');
+      rethrow;
     }
-    final totalRaw = data['total_number'] ?? json['total_number'];
-    return (
-      items: items,
-      total: totalRaw is num ? totalRaw.toInt() : items.length,
-    );
+  }
+
+  /// 取第一个非空、非 'null' 的错误文案。
+  static String _firstErrorText(List<dynamic> values) {
+    for (final v in values) {
+      final s = '${v ?? ''}'.trim();
+      if (s.isNotEmpty && s != 'null') return s;
+    }
+    return '';
   }
 
   /// 我关注的博主列表（登录后可用，访客回 `{}`）：
@@ -1254,20 +1330,25 @@ class WeiyueService {
     int page = 1,
     int count = 20,
   }) async {
-    final json = await _get(
-      WbStack.pc,
-      '$_pcBase/ajax/friendships/friends',
-      query: {'uid': uid, 'relate': 'follows', 'count': count, 'page': page},
-      referer: 'https://weibo.com/u/$uid',
-    );
-    final data = _asMap(json['data']);
-    var raw = _asList(data['users']);
-    if (raw.isEmpty) raw = _asList(json['users']);
-    final users = raw
-        .map((e) => WbUser.fromJson(_asMap(e)))
-        .where((u) => u.id > 0)
-        .toList();
-    final totalRaw = data['total_number'] ?? json['total_number'];
-    return (users: users, total: _intOf(totalRaw));
+    try {
+      final json = await _get(
+        WbStack.pc,
+        '$_pcBase/ajax/friendships/friends',
+        query: {'uid': uid, 'relate': 'follows', 'count': count, 'page': page},
+        referer: 'https://weibo.com/u/$uid',
+      );
+      final data = _asMap(json['data']);
+      var raw = _asList(data['users']);
+      if (raw.isEmpty) raw = _asList(json['users']);
+      final users = raw
+          .map((e) => WbUser.fromJson(_asMap(e)))
+          .where((u) => u.id > 0)
+          .toList();
+      final totalRaw = data['total_number'] ?? json['total_number'];
+      return (users: users, total: _intOf(totalRaw));
+    } catch (e) {
+      session.recordLoginFailure('/ajax/friendships/friends', '$e');
+      rethrow;
+    }
   }
 }

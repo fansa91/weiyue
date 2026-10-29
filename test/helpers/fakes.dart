@@ -122,7 +122,19 @@ class FakeSessionService extends SessionService {
   bool loggedIn;
   bool expiredFlag;
   WbUser? fakeProfile;
+  ProbeDiagnostic? fakeProbeDiag;
+  List<LoginApiFailure> fakeFailures = const [];
+  bool fakeHasXsrf = false;
   FakeSessionService({this.loggedIn = false, this.expiredFlag = false});
+
+  @override
+  ProbeDiagnostic? get lastProbeDiagnostic => fakeProbeDiag;
+
+  @override
+  List<LoginApiFailure> get recentLoginFailures => fakeFailures;
+
+  @override
+  bool get hasXsrfToken => fakeHasXsrf;
 
   @override
   bool get isLoggedIn => loggedIn;
