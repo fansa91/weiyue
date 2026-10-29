@@ -10,6 +10,7 @@ import '../widgets/network_image.dart';
 import 'favorites_screen.dart';
 import 'following_screen.dart';
 import 'login_screen.dart';
+import 'message_center_screen.dart';
 import 'settings_screen.dart';
 import 'theme_screen.dart';
 import '../widgets/about_dialog.dart';
@@ -28,6 +29,11 @@ class _MeScreenState extends State<MeScreen> {
   bool _refreshing = false;
   bool _profileLoading = false;
   bool _probing = false;
+
+  /// 消息中心未读总数（按登录 uid 拉一次，进页面后停留本地状态，
+  /// 不轮询；拉取失败静默无徽标）。
+  int _msgUnread = 0;
+  String _msgUnreadUid = '';
 
   /// 已自动补拉过资料的 uid（失败后不反复自动重试，靠手动刷新入口）。
   String _autoProfileUid = '';
@@ -195,12 +201,31 @@ class _MeScreenState extends State<MeScreen> {
     );
   }
 
+  /// 消息未读：登录态出现（或换了账号）时拉一次汇总，帧后异步执行，
+  /// 不在 build 里 setState；退出登录后 uid 变化会自然失效重拉。
+  void _maybeLoadMsgUnread(SessionService session) {
+    if (!session.isLoggedIn) return;
+    final uid = session.uid;
+    if (uid.isEmpty || uid == _msgUnreadUid) return;
+    _msgUnreadUid = uid;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      try {
+        final u = await context.read<WeiyueService>().getMessageSummary();
+        if (mounted) setState(() => _msgUnread = u.total);
+      } catch (_) {
+        // 汇总失败只丢徽标，入口照常
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final visitor = context.watch<VisitorService>();
     final session = context.watch<SessionService>();
     final cs = Theme.of(context).colorScheme;
     _maybeAutoLoadProfile(session);
+    _maybeLoadMsgUnread(session);
     final myUid = _myUid(session);
     return Scaffold(
       appBar: AppBar(title: const Text('我的'), centerTitle: false),
@@ -232,6 +257,29 @@ class _MeScreenState extends State<MeScreen> {
                       myUid,
                       total: session.profile?.friendsCount ?? 0,
                     ),
+            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            ListTile(
+              leading: const Icon(Icons.mail_outline),
+              title: const Text('消息中心'),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_msgUnread > 0) ...[
+                    Badge(
+                      label: Text(_msgUnread > 99 ? '99+' : '$_msgUnread'),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  const Icon(Icons.chevron_right),
+                ],
+              ),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) =>
+                      const DetailScaffold(child: MessageCenterScreen()),
+                ),
+              ),
             ),
             const Divider(height: 1, indent: 16, endIndent: 16),
             ListTile(

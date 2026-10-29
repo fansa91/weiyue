@@ -430,6 +430,155 @@ class FakeWeiyueService extends WeiyueService {
 
   @override
   Future<Map<String, String>> getEmoticonMap() async => const {};
+
+  // ---------------- 消息中心假数据 ----------------
+
+  MessageUnread fakeUnread = const MessageUnread(
+    mentionStatuses: 2,
+    mentionComments: 1,
+    commentsToMe: 3,
+    likesToMe: 4,
+  );
+
+  @override
+  Future<MessageUnread> getMessageSummary() async => fakeUnread;
+
+  @override
+  Future<MessagePage<MessageFeedItem>> getMessageFeed({
+    String maxId = '',
+    String sinceId = '',
+  }) async => (
+    items: maxId.isEmpty
+        ? [
+            MessageFeedItem(
+              key: 'mf1',
+              actor: makeStatus().user,
+              actionText: '评论了你的微博',
+              createdAtRaw: 'Mon Oct 26 13:20:19 +0800 2026',
+              kind: MessageFeedKind.comment,
+              text: '混合流里的评论一',
+              status: makeStatus(id: 'mf-s1', text: '被评论的微博一'),
+            ),
+          ]
+        : const <MessageFeedItem>[],
+    maxId: '',
+    sinceId: '',
+    hasMore: false,
+  );
+
+  @override
+  Future<MessagePage<WbStatus>> getMentions({
+    String maxId = '',
+    String sinceId = '',
+    bool onlyFollowed = false,
+    bool onlyOriginal = false,
+  }) async => (
+    items: maxId.isEmpty
+        ? [makeStatus(id: 'mt1', text: '@我的微博一')]
+        : const <WbStatus>[],
+    maxId: '',
+    sinceId: '',
+    hasMore: false,
+  );
+
+  @override
+  Future<MessagePage<MessageComment>> getMentionComments({
+    String maxId = '',
+    String sinceId = '',
+    bool onlyFollowed = false,
+  }) async => (
+    items: maxId.isEmpty
+        ? [
+            MessageComment(
+              comment: WbComment(
+                id: 'mc1',
+                user: makeStatus().user,
+                text: '@你的评论一',
+                createdAtRaw: 'Mon Oct 26 13:21:19 +0800 2026',
+              ),
+              status: makeStatus(id: 'mc-s1', text: '被@评论的微博一'),
+            ),
+          ]
+        : const <MessageComment>[],
+    maxId: '',
+    sinceId: '',
+    hasMore: false,
+  );
+
+  @override
+  Future<MessagePage<MessageComment>> getCommentsToMe({
+    String maxId = '',
+    String sinceId = '',
+    bool onlyFollowed = false,
+  }) async => (
+    items: maxId.isEmpty
+        ? [
+            MessageComment(
+              comment: WbComment(
+                id: 'ct1',
+                user: makeStatus().user,
+                text: '评论你的微博一',
+                createdAtRaw: 'Mon Oct 26 13:22:19 +0800 2026',
+                likeCount: 7,
+              ),
+              status: makeStatus(id: 'ct-s1', text: '被评论的微博二'),
+            ),
+          ]
+        : const <MessageComment>[],
+    maxId: '',
+    sinceId: '',
+    hasMore: false,
+  );
+
+  @override
+  Future<MessagePage<MessageComment>> getMyComments({
+    String maxId = '',
+    String sinceId = '',
+  }) async => (
+    items: maxId.isEmpty
+        ? [
+            MessageComment(
+              comment: WbComment(
+                id: 'oc1',
+                user: const WbUser(id: 777, screenName: '登录测试号'),
+                text: '我发出的评论一',
+                createdAtRaw: 'Mon Oct 26 13:23:19 +0800 2026',
+              ),
+              status: makeStatus(id: 'oc-s1', text: '我评论过的微博一'),
+            ),
+          ]
+        : const <MessageComment>[],
+    maxId: '',
+    sinceId: '',
+    hasMore: false,
+  );
+
+  @override
+  Future<MessagePage<MessageLike>> getLikesToMe({
+    String maxId = '',
+    String sinceId = '',
+  }) async => (
+    items: maxId.isEmpty
+        ? [
+            MessageLike(
+              id: 'lk1',
+              user: makeStatus().user,
+              createdAtRaw: 'Mon Oct 26 13:24:19 +0800 2026',
+              status: makeStatus(id: 'lk-s1', text: '被赞的微博一'),
+            ),
+            MessageLike(
+              id: 'lk2',
+              user: makeStatus().user,
+              createdAtRaw: 'Mon Oct 26 13:25:19 +0800 2026',
+              status: makeStatus(id: 'lk-s2', text: '被赞评论所属微博'),
+              commentText: '被赞的评论一',
+            ),
+          ]
+        : const <MessageLike>[],
+    maxId: '',
+    sinceId: '',
+    hasMore: false,
+  );
 }
 
 /// 假 Dio adapter：记录请求并按 handler 返回。
