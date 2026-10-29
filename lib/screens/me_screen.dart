@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/nav.dart';
 import '../core/utils.dart';
 import '../services/session_service.dart';
 import '../services/visitor_service.dart';
@@ -46,7 +47,7 @@ class _MeScreenState extends State<MeScreen> {
   Future<void> _openLogin() async {
     await Navigator.of(
       context,
-    ).push(MaterialPageRoute(builder: (_) => const LoginScreen()));
+    ).push(appPageRoute(builder: (_) => const LoginScreen()));
   }
 
   Future<void> _logout() async {
@@ -77,7 +78,7 @@ class _MeScreenState extends State<MeScreen> {
               title: const Text('我的收藏'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
+                appPageRoute(
                   builder: (_) =>
                       const DetailScaffold(child: FavoritesScreen()),
                 ),
@@ -164,7 +165,7 @@ class _MeScreenState extends State<MeScreen> {
             title: const Text('设置'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
+              appPageRoute(
                 builder: (_) => const DetailScaffold(child: SettingsScreen()),
               ),
             ),
@@ -175,7 +176,7 @@ class _MeScreenState extends State<MeScreen> {
             title: const Text('主题与外观'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(
+              appPageRoute(
                 builder: (_) => const DetailScaffold(child: ThemeScreen()),
               ),
             ),

@@ -9,6 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   cupertino_icons: ^1.0.8
   provider: ^6.1.5
   dio: ^5.9.0
@@ -24,6 +26,7 @@ dependencies:
   flutter_ime: ^3.0.0
   flutter_inappwebview: ^6.1.5
   package_info_plus: ^10.2.2
+  fluent_ui: ^4.17.0
 
 dependency_overrides:
   # flutter_inappwebview 已发布最新版 6.1.5（2024-10）的 Android 实现

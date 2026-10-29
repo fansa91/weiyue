@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/nav.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
 import '../services/weiyue_service.dart';
@@ -101,7 +102,7 @@ class _BandScreenState extends State<BandScreen> {
                     ],
                   ),
                   onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
+                    appPageRoute(
                       builder: (_) => SearchScreen(initialKeyword: item.word),
                     ),
                   ),

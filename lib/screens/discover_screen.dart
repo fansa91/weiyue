@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/nav.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
 import '../services/weiyue_service.dart';
@@ -64,7 +65,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
     if (kw.isEmpty) return;
     Navigator.of(
       context,
-    ).push(MaterialPageRoute(builder: (_) => SearchScreen(initialKeyword: kw)));
+    ).push(appPageRoute(builder: (_) => SearchScreen(initialKeyword: kw)));
   }
 
   @override
@@ -82,7 +83,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
               child: InkWell(
                 borderRadius: BorderRadius.circular(20),
                 onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
+                  appPageRoute(
                     builder: (_) => const SearchScreen(autofocus: true),
                   ),
                 ),
@@ -129,7 +130,7 @@ class _DiscoverScreenState extends State<DiscoverScreen> {
                       avatar: Icon(icon, size: 17),
                       label: Text(name),
                       onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(
+                        appPageRoute(
                           builder: (_) =>
                               BandScreen(title: name, segment: segment),
                         ),

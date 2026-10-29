@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/nav.dart';
 import '../core/quality.dart';
 import '../services/settings_service.dart';
 import 'theme_screen.dart';
@@ -23,7 +24,7 @@ class SettingsScreen extends StatelessWidget {
             title: const Text('外观'),
             subtitle: const Text('主题模式 · 主题色 · 纯黑模式'),
             trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push(MaterialPageRoute(
+            onTap: () => Navigator.of(context).push(appPageRoute(
               builder: (_) => const DetailScaffold(child: ThemeScreen()),
             )),
           ),

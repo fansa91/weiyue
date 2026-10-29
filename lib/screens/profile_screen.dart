@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/nav.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
 import '../services/settings_service.dart';
@@ -223,7 +224,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     label: Text('${p.name} · ${p.itemCount}'),
                     onPressed: () {
                       Navigator.of(context).push(
-                        MaterialPageRoute(
+                        appPageRoute(
                           builder: (_) => DetailScaffold(
                             child: PlaylistScreen(playlist: p),
                           ),
