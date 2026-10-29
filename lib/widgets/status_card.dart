@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/emoticons.dart';
+import '../core/long_image.dart';
 import '../core/nav.dart';
 import '../core/quality.dart';
 import '../services/settings_service.dart';
@@ -362,13 +363,21 @@ class _PicGrid extends StatelessWidget {
 
   /// 视频/直播帖的图片区只是兜底呈现（解析层已剔除混入的封面/视频帧，
   /// 漏网时到这里）：不标「长图」、点图进详情走视频，不进长图阅读器。
-  bool get _isVideoPost => status.hasVideo || status.isLive;
+  /// 判据走长图准入收口：本级或转发原帖任一含视频/直播即拦截
+  ///（见 core/long_image.dart 的 statusAllowsLongImage）。
+  bool get _isVideoPost => !statusAllowsLongImage(status);
 
   void _onTapPic(BuildContext context, int i, ImageQualityPref imageQuality) {
     if (_isVideoPost) {
       openDetail(context, status);
     } else {
-      openPicViewer(context, pics, i, imageQuality: imageQuality);
+      openPicViewer(
+        context,
+        pics,
+        i,
+        imageQuality: imageQuality,
+        allowLongImage: statusAllowsLongImage(status),
+      );
     }
   }
 

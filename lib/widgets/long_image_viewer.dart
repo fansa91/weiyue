@@ -13,17 +13,20 @@ import 'photo_gallery.dart';
 /// - 多图帖点中已知长图 → [LongImageReader]（内含上一张/下一张，
 ///   可逐张翻看整组，其余图按各自尺寸决定模式）；
 /// - 多图帖点中普通/未知图 → 原图库 [PhotoGalleryScreen]（左右滑 + 缩放）。
+/// - [allowLongImage] 为 false 时（帖级长图准入收口判定不通过，如帖子
+///   本级或转发原帖含视频/直播）一律走普通图库，绝不进长图阅读器。
 void openPicViewer(
   BuildContext context,
   List<WbPic> pics,
   int index, {
   ImageQualityPref imageQuality = ImageQualityPref.standard,
+  bool allowLongImage = true,
 }) {
   if (pics.isEmpty) return;
   final i = index.clamp(0, pics.length - 1);
   Navigator.of(context).push(
     MaterialPageRoute(
-      builder: (_) => (pics.length == 1 || pics[i].isLongImage)
+      builder: (_) => (allowLongImage && (pics.length == 1 || pics[i].isLongImage))
           ? LongImageReader(
               pics: pics,
               initialIndex: i,

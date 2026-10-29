@@ -384,6 +384,11 @@ class WbStatus {
 
   bool get hasVideo => video != null && video!.hasPlayable;
 
+  /// 本级或转发链任一层含视频/直播：长图准入的硬兜底判据
+  ///（见 core/long_image.dart 的 statusAllowsLongImage）。
+  bool get hasAnyMediaVideo =>
+      hasVideo || isLive || (retweeted?.hasAnyMediaVideo ?? false);
+
   WbStatus copyWith({
     String? text,
     String? textRaw,
@@ -420,55 +425,39 @@ class WbStatus {
         ? cleanWbText(rawText)
         : stripHtml(htmlText);
 
-    // 视频/直播：PC page_info.object_type == 'video'/'live'；m 端 object_type
-    // 为数字（11=视频）且 type == 'video'/'live'。取流在 media_info.playback_list。
-    // （提到图片解析之前：媒体帖的 pics 需要按视频侧条目过滤，见下。）
-    WbVideo? video;
+    // 视频/直播：主来源是 page_info（PC object_type == 'video'/'live'；
+    // m 端 object_type 为数字 11 且 type == 'video'/'live'）。取流在
+    // media_info.playback_list。
+    // 次来源是 mix_media_info（PC 新结构，访客实证 2026-10-29）：图文/多
+    // 视频混合帖没有 page_info、没有 pic_infos，全部媒体在
+    // mix_media_info.items[] 里——pic 项 data 与 pic_infos 条目同构，
+    // video 项 data 与 page_info 同构（media_info 带 playback_list）。
+    // 旧解析对这类帖 pics 全丢、video=null，视频既播不了，其封面在别的
+    // 数据形态下还会被当普通图判长图，故这里统一分流。
+    // （视频解析提到图片解析之前：媒体帖的 pics 需要按视频侧条目过滤。）
     final pageInfo = _mapOf(j['page_info']);
-    final piType = _strOf(pageInfo['type']);
-    final piObjType = pageInfo['object_type'];
-    final isMediaPage =
-        pageInfo.isNotEmpty &&
-        (piObjType == 'video' ||
-            piObjType == 'live' ||
-            piObjType == 11 ||
-            piType == 'video' ||
-            piType == 'live');
-    if (isMediaPage) {
-      final mi = _mapOf(pageInfo['media_info']);
-      final playbacks = <WbPlayback>[];
-      for (final item in _listOf(mi['playback_list'])) {
-        final im = _mapOf(item);
-        final play = _mapOf(im['play_info']);
-        final url = httpsUrl(_strOf(play['url']));
-        if (url.isEmpty) continue;
-        final meta = _mapOf(im['meta']);
-        playbacks.add(
-          WbPlayback(
-            label: _strOf(play['label'] ?? meta['label']),
-            width: _intOf(play['width']),
-            height: _intOf(play['height']),
-            url: url,
-            bitrate: _intOf(play['bitrate']),
-          ),
-        );
+    final mixItems = <Map<String, dynamic>>[];
+    for (final e in _listOf(_mapOf(j['mix_media_info'])['items'])) {
+      final m = _mapOf(e);
+      if (m.isNotEmpty) mixItems.add(m);
+    }
+    Map<String, dynamic>? mixVideoData;
+    for (final it in mixItems) {
+      final t = _strOf(it['type']);
+      if (t == 'video' || t == 'live') {
+        mixVideoData = _mapOf(it['data']);
+        break;
       }
-      playbacks.sort((a, b) => b.height.compareTo(a.height));
-      final dur = mi['duration'];
-      var cover = _pagePicOf(pageInfo);
-      if (cover.isEmpty) {
-        final picInfo = _mapOf(pageInfo['pic_info']);
-        cover = httpsUrl(_strOf(_mapOf(picInfo['pic_big'])['url']));
-      }
-      video = WbVideo(
-        cover: cover,
-        durationSec: dur is num ? dur.toDouble() : double.tryParse('$dur') ?? 0,
-        onlineUsers: _strOf(mi['online_users']),
-        playbackList: playbacks,
-        fallbackUrl: httpsUrl(
-          _strOf(mi['stream_url_hd'] ?? mi['mp4_hd_url'] ?? mi['stream_url']),
-        ),
-      );
+    }
+    var mediaMap = pageInfo;
+    if (!_isMediaMap(mediaMap) &&
+        mixVideoData != null &&
+        _isMediaMap(mixVideoData)) {
+      mediaMap = mixVideoData;
+    }
+    WbVideo? video;
+    if (_isMediaMap(mediaMap)) {
+      video = _buildVideo(mediaMap);
     }
 
     // 图片：PC 用 pic_ids + pic_infos{pid:{thumbnail/bmiddle/large/original:{url}}}
@@ -480,11 +469,37 @@ class WbStatus {
     // 时整组丢弃（纯视频帖 pics 本就应为空，封面由 page_pic 呈现，不受影响；
     // 视频合集/视频页签走 page_info 封面不用 pics，同样不受影响）。
     final picIdSet = _listOf(j['pic_ids']).map((e) => '$e').toSet();
-    final coverPid = _strOf(_mapOf(pageInfo['page_pic'])['pid']);
+    var coverPid = _strOf(_mapOf(pageInfo['page_pic'])['pid']);
+    if (coverPid.isEmpty && mixVideoData != null) {
+      coverPid = _strOf(_mapOf(mixVideoData['page_pic'])['pid']);
+    }
     bool keepPic(String pid) {
       if (video == null) return true; // 非媒体帖：原样保留
       if (pid.isNotEmpty && pid == coverPid) return false; // 封面本体
       return picIdSet.contains(pid); // pic_ids 为空 → 全剔除
+    }
+
+    // pic_infos 条目 / mix pic 项 data 同构，共用一个构建器。
+    WbPic picFromInfo(String pid, Map<String, dynamic> info) {
+      String u(String k) => httpsUrl(_strOf(_mapOf(info[k])['url']));
+      // 尺寸：各档位对象除 url 外通常还带 width/height（数字或字符串），
+      // 优先 large，其次 original/bmiddle/thumbnail，取第一组有效值。
+      var w = 0, h = 0;
+      for (final k in ['large', 'original', 'bmiddle', 'thumbnail']) {
+        final sizeObj = _mapOf(info[k]);
+        w = _intOf(sizeObj['width']);
+        h = _intOf(sizeObj['height']);
+        if (w > 0 && h > 0) break;
+      }
+      return WbPic(
+        pid: pid,
+        thumbnail: u('thumbnail'),
+        bmiddle: u('bmiddle'),
+        large: u('large'),
+        original: u('original'),
+        width: w,
+        height: h,
+      );
     }
 
     final pics = <WbPic>[];
@@ -497,33 +512,34 @@ class WbStatus {
       for (final pid in pids) {
         final info = _mapOf(picInfos[pid]);
         if (info.isEmpty) continue;
+        // 条目自带 type 标记为视频的，是视频封面/帧，不是照片
+        //（type=='livephoto' 是实况照片，仍按图片保留）。
+        if (_strOf(info['type']) == 'video') continue;
         if (!keepPic(pid)) continue;
-        String u(String k) => httpsUrl(_strOf(_mapOf(info[k])['url']));
-        // 尺寸：各档位对象除 url 外通常还带 width/height（数字或字符串），
-        // 优先 large，其次 original/bmiddle/thumbnail，取第一组有效值。
-        var w = 0, h = 0;
-        for (final k in ['large', 'original', 'bmiddle', 'thumbnail']) {
-          final sizeObj = _mapOf(info[k]);
-          w = _intOf(sizeObj['width']);
-          h = _intOf(sizeObj['height']);
-          if (w > 0 && h > 0) break;
-        }
-        pics.add(
-          WbPic(
-            pid: pid,
-            thumbnail: u('thumbnail'),
-            bmiddle: u('bmiddle'),
-            large: u('large'),
-            original: u('original'),
-            width: w,
-            height: h,
-          ),
-        );
+        pics.add(picFromInfo(pid, info));
+      }
+    } else if (mixItems.any((it) => _strOf(it['type']) == 'pic')) {
+      // mix 帖的图片只在 items 里（pic_infos 为空）：pic 项由 type 显式
+      // 标记，不走 pic_ids 过滤（避免与 pic_ids 形态差异误杀真图），
+      // 只排除与视频封面同 pid 的条目（防御）。
+      for (final it in mixItems) {
+        if (_strOf(it['type']) != 'pic') continue;
+        final data = _mapOf(it['data']);
+        if (data.isEmpty) continue;
+        final pid = _strOf(it['id'] ?? data['pic_id']);
+        if (pid.isNotEmpty && pid == coverPid) continue;
+        pics.add(picFromInfo(pid, data));
       }
     } else {
       for (final p in _listOf(j['pics'])) {
         final pm = _mapOf(p);
         if (pm.isEmpty) continue;
+        // m 端混合帖的 pics 里混有 type=='video' 的条目（带 videoSrc，
+        // 是视频封面/帧）：按 type 标记直接剔除，不再单靠 pic_ids 名单
+        //（名单完整性在不同容器下并不一致）。
+        if (_strOf(pm['type']) == 'video' || pm.containsKey('videoSrc')) {
+          continue;
+        }
         if (!keepPic(_strOf(pm['pid']))) continue;
         // m 端尺寸：large:{url,width,height} 或 geo:{width,height}
         final largeObj = _mapOf(pm['large']);
@@ -561,9 +577,69 @@ class WbStatus {
       video: video,
       isLongText: _boolOf(j['isLongText']),
       retweeted: rtMap.isEmpty ? null : WbStatus.fromJson(rtMap),
-      pageObjectId: _strOf(pageInfo['object_id']),
-      isLive: piObjType == 'live' || piType == 'live',
-      pagePic: _pagePicOf(pageInfo),
+      pageObjectId: _strOf(
+        pageInfo['object_id'] ?? mediaMap['object_id'],
+      ),
+      isLive: _isLiveMap(pageInfo) || _isLiveMap(mediaMap),
+      pagePic: () {
+        final pp = _pagePicOf(pageInfo);
+        return pp.isNotEmpty ? pp : _pagePicOf(mediaMap);
+      }(),
+    );
+  }
+
+  /// page_info / mix video 项 data 是否为视频/直播媒体映射：
+  /// object_type ∈ {'video','live',11} 或 type ∈ {'video','live','11'}。
+  static bool _isMediaMap(Map<String, dynamic> m) {
+    if (m.isEmpty) return false;
+    final objType = m['object_type'];
+    final type = _strOf(m['type']);
+    return objType == 'video' ||
+        objType == 'live' ||
+        objType == 11 ||
+        type == 'video' ||
+        type == 'live' ||
+        type == '11';
+  }
+
+  static bool _isLiveMap(Map<String, dynamic> m) =>
+      m['object_type'] == 'live' || _strOf(m['type']) == 'live';
+
+  /// 从 page_info 同构映射构建视频（mix video 项的 data 与之同构，共用）。
+  static WbVideo _buildVideo(Map<String, dynamic> mediaMap) {
+    final mi = _mapOf(mediaMap['media_info']);
+    final playbacks = <WbPlayback>[];
+    for (final item in _listOf(mi['playback_list'])) {
+      final im = _mapOf(item);
+      final play = _mapOf(im['play_info']);
+      final url = httpsUrl(_strOf(play['url']));
+      if (url.isEmpty) continue;
+      final meta = _mapOf(im['meta']);
+      playbacks.add(
+        WbPlayback(
+          label: _strOf(play['label'] ?? meta['label']),
+          width: _intOf(play['width']),
+          height: _intOf(play['height']),
+          url: url,
+          bitrate: _intOf(play['bitrate']),
+        ),
+      );
+    }
+    playbacks.sort((a, b) => b.height.compareTo(a.height));
+    final dur = mi['duration'];
+    var cover = _pagePicOf(mediaMap);
+    if (cover.isEmpty) {
+      final picInfo = _mapOf(mediaMap['pic_info']);
+      cover = httpsUrl(_strOf(_mapOf(picInfo['pic_big'])['url']));
+    }
+    return WbVideo(
+      cover: cover,
+      durationSec: dur is num ? dur.toDouble() : double.tryParse('$dur') ?? 0,
+      onlineUsers: _strOf(mi['online_users']),
+      playbackList: playbacks,
+      fallbackUrl: httpsUrl(
+        _strOf(mi['stream_url_hd'] ?? mi['mp4_hd_url'] ?? mi['stream_url']),
+      ),
     );
   }
 
