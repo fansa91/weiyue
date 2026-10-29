@@ -33,6 +33,14 @@ class _LoginScreenState extends State<LoginScreen> {
   static const _mHome = 'https://m.weibo.cn/';
   static const _pcHome = 'https://weibo.com/';
 
+  /// 移动端登录直达入口（官方 SSO 登录页）；首页加载异常时可切到这里。
+  static const _directLogin = 'https://passport.weibo.com/sso/signin?entry=wapsso';
+
+  /// 常规移动端浏览器 UA，避免站点对 WebView 默认 UA 返回异常页面。
+  static const _mobileUa =
+      'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+
   /// 收割时逐个查询的 URL（CookieManager 按 URL 返回该域可见的 Cookie）。
   static const _harvestUrls = [
     'https://weibo.com/',
@@ -55,6 +63,18 @@ class _LoginScreenState extends State<LoginScreen> {
   InAppWebViewController? _controller;
   bool _harvesting = false;
   bool _onPcSite = false;
+
+  /// 首屏加载进度（0-100）；页面加载出错时展示错误面板而非白屏。
+  int _progress = 0;
+  String? _loadError;
+
+  Future<void> _load(String url) async {
+    setState(() {
+      _loadError = null;
+      _progress = 0;
+    });
+    await _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+  }
 
   Future<List<HarvestedCookie>> _harvestCookies() async {
     final manager = CookieManager.instance();
@@ -125,7 +145,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _openPcSite() async {
     setState(() => _onPcSite = true);
-    await _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(_pcHome)));
+    await _load(_pcHome);
   }
 
   @override
@@ -154,15 +174,61 @@ class _LoginScreenState extends State<LoginScreen> {
       body: _supported
           ? Column(
               children: [
+                if (_progress > 0 && _progress < 100)
+                  LinearProgressIndicator(value: _progress / 100),
                 Expanded(
-                  child: InAppWebView(
-                    initialUrlRequest: URLRequest(url: WebUri(_mHome)),
-                    initialSettings: InAppWebViewSettings(
-                      javaScriptEnabled: true,
-                      domStorageEnabled: true,
-                      thirdPartyCookiesEnabled: true,
-                    ),
-                    onWebViewCreated: (controller) => _controller = controller,
+                  child: Stack(
+                    children: [
+                      InAppWebView(
+                        initialUrlRequest: URLRequest(url: WebUri(_mHome)),
+                        initialSettings: InAppWebViewSettings(
+                          javaScriptEnabled: true,
+                          domStorageEnabled: true,
+                          thirdPartyCookiesEnabled: true,
+                          supportMultipleWindows: true,
+                          javaScriptCanOpenWindowsAutomatically: true,
+                          userAgent: _mobileUa,
+                          // 登录链常有 http 跳转/混合内容，放宽避免整页被拦
+                          mixedContentMode:
+                              MixedContentMode.MIXED_CONTENT_COMPATIBILITY_MODE,
+                        ),
+                        onWebViewCreated: (controller) =>
+                            _controller = controller,
+                        onLoadStart: (_, _) {
+                          if (mounted) setState(() => _loadError = null);
+                        },
+                        onProgressChanged: (_, progress) {
+                          if (mounted) setState(() => _progress = progress);
+                        },
+                        onReceivedError: (_, request, error) {
+                          if (!(request.isForMainFrame ?? false)) return;
+                          if (mounted) {
+                            setState(() {
+                              _loadError =
+                                  '页面加载失败：${error.description}'
+                                  '（${request.url}）';
+                            });
+                          }
+                        },
+                        onReceivedHttpError: (_, request, response) {
+                          if (!(request.isForMainFrame ?? false)) return;
+                          final code = response.statusCode ?? 0;
+                          if (code >= 400 && mounted) {
+                            setState(() {
+                              _loadError =
+                                  '页面加载失败：服务器返回 $code'
+                                  '（${request.url}）';
+                            });
+                          }
+                        },
+                      ),
+                      if (_loadError != null)
+                        LoginLoadErrorView(
+                          message: _loadError!,
+                          onRetry: () => _controller?.reload(),
+                          onDirectLogin: () => _load(_directLogin),
+                        ),
+                    ],
                   ),
                 ),
                 const SafeArea(
@@ -185,6 +251,61 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Text('当前平台暂不支持内置登录页', textAlign: TextAlign.center),
               ),
             ),
+    );
+  }
+}
+
+/// 登录页加载失败时盖在 WebView 上的面板：给出失败原因（便于回传诊断）
+/// 与两个恢复动作——重新加载、换官方 SSO 直达登录页。
+class LoginLoadErrorView extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  final VoidCallback onDirectLogin;
+
+  const LoginLoadErrorView({
+    super.key,
+    required this.message,
+    required this.onRetry,
+    required this.onDirectLogin,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      color: cs.surface,
+      padding: const EdgeInsets.all(24),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off_outlined, size: 40, color: cs.error),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 10,
+              alignment: WrapAlignment.center,
+              children: [
+                FilledButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('重新加载'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: onDirectLogin,
+                  icon: const Icon(Icons.login, size: 18),
+                  label: const Text('换直达登录页'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
