@@ -193,14 +193,22 @@ class WeiyueService {
 
   /// 纯文本 GET（同 _get 的身份处理）：给返回 JSONP 的接口用
   /// （m container/getItem 的响应被括号包裹，dio 的 JSON 解码接不住）。
+  /// [sessionOnly]=true 时只许登录态（探活提取 uid 用，不回退访客）；
+  /// [onResponse] 在拿到响应后回调一次（读 Set-Cookie 等响应头用）。
   Future<String> _getRaw(
     WbStack stack,
     String url, {
     Map<String, dynamic>? query,
     String? referer,
     bool retried = false,
+    bool sessionOnly = false,
+    void Function(Response<dynamic> resp)? onResponse,
   }) async {
-    final picked = await _cookieFor(stack, retried: retried);
+    final picked = await _cookieFor(
+      stack,
+      retried: retried,
+      sessionOnly: sessionOnly,
+    );
     final dio = stack == WbStack.pc ? _pc : _m;
     final Response<dynamic> resp;
     try {
@@ -220,11 +228,15 @@ class WeiyueService {
     } on DioException catch (e) {
       throw WeiyueException('网络错误：${e.message ?? e.type.name}');
     }
+    onResponse?.call(resp);
     final status = resp.statusCode ?? 0;
     final body = resp.data?.toString() ?? '';
     final location = resp.headers.value('location') ?? '';
     final notLoggedIn = _notLoggedInSignal(status, null, location, body);
     if (notLoggedIn) {
+      if (sessionOnly) {
+        throw const WeiyueException('登录态未生效（服务端未认）');
+      }
       if (picked.useSession) {
         session.markExpired();
         return _getRaw(
@@ -575,8 +587,13 @@ class WeiyueService {
   /// 再合并 profile/detail 的扩展字段（gender 性别、birthday 生日——
   /// 文档 detail 结构明确，两者 info 里不一定有）。detail 拉取失败
   /// 不影响主资料返回。
+  /// uid 为空直接抛错：空参请求必被服务端回 400 非 JSON（真机实证），
+  /// 还会污染诊断失败记录，不如本地拦下并给出可操作提示。
   /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
   Future<WbUser> getMyProfile(String uid) async {
+    if (uid.trim().isEmpty) {
+      throw const WeiyueException('缺少用户 ID，请先点「修复登录态」或重新检测');
+    }
     try {
       var user = await getProfileInfo(uid);
       try {
@@ -1117,80 +1134,169 @@ class WeiyueService {
     return null;
   }
 
+  static final _uidAssignRe = RegExp(
+    r"""\[\s*['"]uid['"]\s*\]\s*=\s*['"](\d{3,15})['"]""",
+  );
+  static final _uidKeyRe = RegExp(
+    r"""['"]uid['"]\s*:\s*['"]?(\d{3,15})['"]?""",
+  );
+
+  /// 从桌面首页 HTML 里提取当前登录用户的 uid（探活主路径）。
+  ///
+  /// 登录态首页的内嵌配置带有本人 uid，形态有二：
+  /// `$CONFIG['uid']='123456'`（赋值式）与配置对象里的 `"uid":"123456"`
+  /// （键值式）。先逐个在 `$CONFIG` 段落附近（其后 4096 字符内）找，
+  /// 避免误匹配页面里其他用户的 id；段落里没有再退到全文第一个
+  /// `"uid"` 键。只认纯数字、排除全 0；提取不到返回 null（不抛）。
+  static String? extractSelfUidFromHomepage(String html) {
+    String? pick(String s) {
+      for (final re in [_uidAssignRe, _uidKeyRe]) {
+        final m = re.firstMatch(s);
+        if (m != null) {
+          final v = m.group(1)!;
+          if (!RegExp(r'^0+$').hasMatch(v)) return v;
+        }
+      }
+      return null;
+    }
+
+    var idx = 0;
+    while (true) {
+      final at = html.indexOf(r'$CONFIG', idx);
+      if (at < 0) break;
+      final end = at + 4096 > html.length ? html.length : at + 4096;
+      final found = pick(html.substring(at, end));
+      if (found != null) return found;
+      idx = at + 7;
+    }
+    return pick(html);
+  }
+
+  /// 探活主路径：用登录 Cookie 拉桌面首页 HTML 并提取本人 uid。
+  /// sessionOnly 不回退访客——访客/未登录首页的配置里没有本人 uid。
+  /// 顺带收下响应 Set-Cookie 里的 XSRF-TOKEN 存入会话：该令牌由页面
+  /// 响应下发，WebView 收割的时机/域名覆盖常拿不到（真机实证恒「无」），
+  /// 而它正是首页这类页面响应才发的。异常向上抛，由探活处记录。
+  Future<String?> _fetchSelfUid() async {
+    String? xsrf;
+    final html = await _getRaw(
+      WbStack.pc,
+      '$_pcBase/',
+      sessionOnly: true,
+      onResponse: (resp) {
+        final setCookies = resp.headers.map['set-cookie'];
+        if (setCookies == null) return;
+        for (final raw in setCookies) {
+          final m = RegExp(r'^\s*XSRF-TOKEN=([^;]*)').firstMatch(raw);
+          final v = (m?.group(1) ?? '').trim();
+          if (v.isNotEmpty) xsrf = v;
+        }
+      },
+    );
+    final token = xsrf;
+    if (token != null && token != session.xsrfToken()) {
+      await session.saveHarvest([
+        HarvestedCookie(name: 'XSRF-TOKEN', value: token, domain: 'weibo.com'),
+      ]);
+    }
+    return extractSelfUidFromHomepage(html);
+  }
+
   /// 登录探活（收割 Cookie 后调用）：全部走 sessionOnly 请求，
   /// 不回退访客——访客能读的接口成功不代表登录解锁。
-  /// - PC 当前用户：先 /ajax/setting/getBasicInfo（设置族，登录态接口），
-  ///   失败再试 /ajax/profile/info 无参；两者都拿不到用户时，
-  ///   用 friendstimeline 不被挡（访客恒 403）作为解锁兜底判据。
+  /// - PC 本人 uid（主路径）：拉桌面首页 HTML 从内嵌配置提取 uid，
+  ///   再 /ajax/profile/info?uid= 拿当前用户。v0.1.8 真机诊断实证：
+  ///   无参 profile/info 与空 uid 的 friendships/friends 均回 HTTP 400
+  ///   非 JSON，uid 拿不到则名称/头像/关注全卡住，故此路优先。
+  /// - PC 兜底：/ajax/setting/getBasicInfo、无参 profile/info 依次试，
+  ///   都拿不到用户时用 friendstimeline 不被挡（访客恒 403）判解锁。
   /// - m 栈：/api/statuses/repostTimeline 访客固定回 ok:-100（文档实测），
   ///   登录态回任何正常 JSON 即算解锁（用哑 id 探，不取真实数据）。
+  /// 诊断快照在 finally 里无条件写：任何一步异常都不许让快照停在旧时间。
   /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
   Future<({WbUser? user, bool pcUnlocked, bool mUnlocked})>
   probeSession() async {
     WbUser? user;
     var pcOk = false;
-    try {
-      final json = await _get(
-        WbStack.pc,
-        '$_pcBase/ajax/setting/getBasicInfo',
-        sessionOnly: true,
-      );
-      user = _parseCurrentUser(json);
-      pcOk = user != null;
-    } catch (e) {
-      session.recordLoginFailure('/ajax/setting/getBasicInfo', '$e');
-    }
-    if (user == null) {
-      try {
-        final json = await _get(
-          WbStack.pc,
-          '$_pcBase/ajax/profile/info',
-          sessionOnly: true,
-        );
-        user = _parseCurrentUser(json);
-        pcOk = user != null;
-      } catch (e) {
-        session.recordLoginFailure('/ajax/profile/info', '$e');
-      }
-    }
-    if (!pcOk) {
-      try {
-        await _get(
-          WbStack.pc,
-          '$_pcBase/ajax/feed/friendstimeline',
-          query: {'list_id': 10001, 'refresh': 4, 'since_id': 0, 'count': 3},
-          sessionOnly: true,
-        );
-        pcOk = true;
-      } catch (e) {
-        session.recordLoginFailure('/ajax/feed/friendstimeline', '$e');
-      }
-    }
     var mOk = false;
     try {
-      await _get(
-        WbStack.m,
-        '$_mBase/api/statuses/repostTimeline',
-        query: {'id': '0', 'page': 1},
-        sessionOnly: true,
-      );
-      mOk = true;
-    } catch (e) {
-      session.recordLoginFailure('/api/statuses/repostTimeline', '$e');
-    }
-    // 探活末尾顺带补拉本人完整资料并持久化（资料头展示用）；
-    // 补拉失败不影响探活结论，账号区回退简版展示后可再自动/手动重拉。
-    if (user != null && user.id > 0) {
       try {
-        final full = await getMyProfile('${user.id}');
-        await session.saveProfile(full);
-      } catch (_) {}
+        final uid = await _fetchSelfUid();
+        if (uid != null && uid.isNotEmpty) {
+          final info = await getProfileInfo(uid);
+          if (info.id > 0 || info.screenName.isNotEmpty) {
+            user = info;
+            pcOk = true;
+          }
+        }
+      } catch (e) {
+        session.recordLoginFailure('weibo.com 首页', '$e');
+      }
+      if (user == null) {
+        try {
+          final json = await _get(
+            WbStack.pc,
+            '$_pcBase/ajax/setting/getBasicInfo',
+            sessionOnly: true,
+          );
+          user = _parseCurrentUser(json);
+          pcOk = user != null;
+        } catch (e) {
+          session.recordLoginFailure('/ajax/setting/getBasicInfo', '$e');
+        }
+      }
+      if (user == null) {
+        try {
+          final json = await _get(
+            WbStack.pc,
+            '$_pcBase/ajax/profile/info',
+            sessionOnly: true,
+          );
+          user = _parseCurrentUser(json);
+          pcOk = user != null;
+        } catch (e) {
+          session.recordLoginFailure('/ajax/profile/info', '$e');
+        }
+      }
+      if (!pcOk) {
+        try {
+          await _get(
+            WbStack.pc,
+            '$_pcBase/ajax/feed/friendstimeline',
+            query: {'list_id': 10001, 'refresh': 4, 'since_id': 0, 'count': 3},
+            sessionOnly: true,
+          );
+          pcOk = true;
+        } catch (e) {
+          session.recordLoginFailure('/ajax/feed/friendstimeline', '$e');
+        }
+      }
+      try {
+        await _get(
+          WbStack.m,
+          '$_mBase/api/statuses/repostTimeline',
+          query: {'id': '0', 'page': 1},
+          sessionOnly: true,
+        );
+        mOk = true;
+      } catch (e) {
+        session.recordLoginFailure('/api/statuses/repostTimeline', '$e');
+      }
+      // 探活末尾顺带补拉本人完整资料并持久化（资料头展示用）；
+      // 补拉失败不影响探活结论，账号区回退简版展示后可再自动/手动重拉。
+      if (user != null && user.id > 0) {
+        try {
+          final full = await getMyProfile('${user.id}');
+          await session.saveProfile(full);
+        } catch (_) {}
+      }
+    } finally {
+      session.recordProbeResult(
+        pcUnlocked: pcOk,
+        mUnlocked: mOk,
+        hasUid: user != null && user.id > 0,
+      );
     }
-    session.recordProbeResult(
-      pcUnlocked: pcOk,
-      mUnlocked: mOk,
-      hasUid: user != null && user.id > 0,
-    );
     return (user: user, pcUnlocked: pcOk, mUnlocked: mOk);
   }
 
@@ -1292,9 +1398,7 @@ class WeiyueService {
         ]);
         final okVal = json['ok'];
         if (okVal == 0 || okVal == '0' || msg.isNotEmpty) {
-          throw WeiyueException(
-            msg.isNotEmpty ? msg : '收藏接口返回错误（ok=0）',
-          );
+          throw WeiyueException(msg.isNotEmpty ? msg : '收藏接口返回错误（ok=0）');
         }
       }
       final totalRaw =
@@ -1324,12 +1428,16 @@ class WeiyueService {
   /// （WEIBO_API.md 被挡清单记载的确切路径；relate=fans 为粉丝列表）。
   /// 登录态响应结构未实测，防御解析：用户数组依次找 data.users /
   /// 顶层 users，总数依次找 data.total_number / 顶层 total_number。
+  /// uid 为空直接抛错（同 getMyProfile：空参必 400，不发请求）。
   /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
   Future<({List<WbUser> users, int total})> getMyFollowing(
     String uid, {
     int page = 1,
     int count = 20,
   }) async {
+    if (uid.trim().isEmpty) {
+      throw const WeiyueException('缺少用户 ID，请先点「修复登录态」或重新检测');
+    }
     try {
       final json = await _get(
         WbStack.pc,

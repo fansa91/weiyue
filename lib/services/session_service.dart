@@ -142,8 +142,7 @@ class SessionService extends ChangeNotifier {
   ProbeDiagnostic? get lastProbeDiagnostic => _lastProbe;
 
   /// 最近几次登录类接口失败（新→旧），供诊断面板展示。
-  List<LoginApiFailure> get recentLoginFailures =>
-      List.unmodifiable(_failures);
+  List<LoginApiFailure> get recentLoginFailures => List.unmodifiable(_failures);
 
   /// PC 栈的 XSRF-TOKEN Cookie 值：请求层组装 `X-Xsrf-Token` 头用
   /// （网页端每个 ajax 请求都带该头，缺失时多个接口回 HTTP 400）。
@@ -202,16 +201,24 @@ class SessionService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 诊断数据落盘（异步、失败静默：诊断不能反过来影响主流程）。
+  /// 诊断落盘串行链：每次落盘都排队执行、且执行时才序列化当前状态，
+  /// 保证后写的永远是最新状态。否则失败记录与探活快照的两次异步落盘
+  /// 可能乱序，后到的一份会带着旧快照覆盖新快照（真机实证：失败记录
+  /// 已更新到 05:29，「最近检测」却停在前一晚）。
+  Future<void> _diagWriteChain = Future<void>.value();
+
+  /// 诊断数据落盘（排队串行、失败静默：诊断不能反过来影响主流程）。
   void _persistDiag() {
-    final payload = jsonEncode({
-      'probe': _lastProbe?.toJson(),
-      'failures': _failures.map((f) => f.toJson()).toList(),
+    _diagWriteChain = _diagWriteChain.then((_) async {
+      try {
+        final payload = jsonEncode({
+          'probe': _lastProbe?.toJson(),
+          'failures': _failures.map((f) => f.toJson()).toList(),
+        });
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_keyDiag, payload);
+      } catch (_) {}
     });
-    final fut = SharedPreferences.getInstance();
-    fut.then((prefs) {
-      prefs.setString(_keyDiag, payload);
-    }, onError: (_) {});
   }
 
   static String normalizeDomain(String raw) {

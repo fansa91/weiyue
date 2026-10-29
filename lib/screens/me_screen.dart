@@ -32,6 +32,10 @@ class _MeScreenState extends State<MeScreen> {
   /// 已自动补拉过资料的 uid（失败后不反复自动重试，靠手动刷新入口）。
   String _autoProfileUid = '';
 
+  /// 已登录但 uid 为空时已自动探活过一次（防重复触发；
+  /// 退出登录或拿到 uid 后重置，之后靠诊断面板「重新检测」手动重试）。
+  bool _autoProbedWithoutUid = false;
+
   Future<void> _refreshVisitor() async {
     setState(() => _refreshing = true);
     try {
@@ -62,14 +66,13 @@ class _MeScreenState extends State<MeScreen> {
   /// 还在时会自动跨域登录，用户点「完成」即重新收割 + 探活。
   Future<void> _openRepairLogin() async {
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => const LoginScreen(startOnPcSite: true),
-      ),
+      MaterialPageRoute(builder: (_) => const LoginScreen(startOnPcSite: true)),
     );
   }
 
   /// 重新检测：重跑探活并把结论存回会话（探活内部同时写诊断快照）。
-  Future<void> _reprobe() async {
+  /// [silent]=true 为页面自动触发：不弹提示，结果看诊断面板即可。
+  Future<void> _reprobe({bool silent = false}) async {
     if (_probing) return;
     setState(() => _probing = true);
     final session = context.read<SessionService>();
@@ -85,7 +88,7 @@ class _MeScreenState extends State<MeScreen> {
       if (!probe.pcUnlocked && !probe.mUnlocked) {
         session.markExpired();
       }
-      if (mounted) {
+      if (!silent && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -96,7 +99,7 @@ class _MeScreenState extends State<MeScreen> {
         );
       }
     } catch (e) {
-      if (mounted) {
+      if (!silent && mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('检测失败：$e')));
@@ -125,13 +128,27 @@ class _MeScreenState extends State<MeScreen> {
 
   /// 已登录但资料未补拉（或换了账号）时，帧后自动拉一次。
   /// 只调度不直接 setState，实际加载在 [_loadProfile]。
+  /// 例外：有登录 Cookie 却没拿到 uid 时（v0.1.8 真机实证），先自动
+  /// 跑一遍探活——探活主路径会从桌面首页内嵌配置提取 uid 并补全资料；
+  /// 只自动跑一次，不反复打扰。
   void _maybeAutoLoadProfile(SessionService session) {
     if (!session.isLoggedIn) {
       _autoProfileUid = '';
+      _autoProbedWithoutUid = false;
       return;
     }
     final uid = _myUid(session);
-    if (uid.isEmpty || _profileLoading) return;
+    if (uid.isEmpty) {
+      if (!_autoProbedWithoutUid && !_probing) {
+        _autoProbedWithoutUid = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _reprobe(silent: true);
+        });
+      }
+      return;
+    }
+    _autoProbedWithoutUid = false;
+    if (_profileLoading) return;
     final p = session.profile;
     if (p != null && '${p.id}' == uid) return;
     if (_autoProfileUid == uid) return;
@@ -696,7 +713,6 @@ class _MeScreenState extends State<MeScreen> {
       ],
     );
   }
-
 
   String _fmtDiagTime(int ms) {
     if (ms <= 0) return '';

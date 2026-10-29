@@ -203,8 +203,26 @@ void main() {
       final visitor = CountingVisitor();
       final session = await _sessionWithCookies();
       final pcAdapter = FakeAdapter((opt) async {
-        expect(opt.uri.path, '/ajax/setting/getBasicInfo');
-        return jsonBody(_fixture('current_user.json'));
+        switch (opt.uri.path) {
+          case '/':
+            // 探活主路径先拉桌面首页提 uid：这份 HTML 不含 uid，
+            // 本用例验证的是 getBasicInfo 兜底路径
+            return ResponseBody.fromString(
+              '<html><head></head><body>home</body></html>',
+              200,
+              headers: {
+                Headers.contentTypeHeader: ['text/html; charset=utf-8'],
+              },
+            );
+          case '/ajax/setting/getBasicInfo':
+            return jsonBody(_fixture('current_user.json'));
+          case '/ajax/profile/info':
+            return jsonBody(_fixture('my_profile_info.json'));
+          case '/ajax/profile/detail':
+            return jsonBody(_fixture('my_profile_detail.json'));
+          default:
+            return jsonBody({'ok': 1});
+        }
       });
       final mAdapter = FakeAdapter(
         (opt) async => jsonBody({'ok': 1, 'data': []}),
