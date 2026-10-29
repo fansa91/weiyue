@@ -79,6 +79,9 @@ class WbUser {
   final int friendsCount;
   final int statusesCount;
   final String location;
+  final String gender;
+  final String birthday;
+  final String coverImage;
   final String coverImagePhone;
 
   const WbUser({
@@ -94,8 +97,73 @@ class WbUser {
     this.friendsCount = 0,
     this.statusesCount = 0,
     this.location = '',
+    this.gender = '',
+    this.birthday = '',
+    this.coverImage = '',
     this.coverImagePhone = '',
   });
+
+  /// 封面展示图：手机版封面优先，其次通用封面。
+  String get bestCover =>
+      coverImagePhone.isNotEmpty ? coverImagePhone : coverImage;
+
+  WbUser copyWith({
+    int? id,
+    String? screenName,
+    String? avatar,
+    bool? verified,
+    int? verifiedType,
+    String? verifiedReason,
+    String? description,
+    int? followersCount,
+    String? followersCountStr,
+    int? friendsCount,
+    int? statusesCount,
+    String? location,
+    String? gender,
+    String? birthday,
+    String? coverImage,
+    String? coverImagePhone,
+  }) {
+    return WbUser(
+      id: id ?? this.id,
+      screenName: screenName ?? this.screenName,
+      avatar: avatar ?? this.avatar,
+      verified: verified ?? this.verified,
+      verifiedType: verifiedType ?? this.verifiedType,
+      verifiedReason: verifiedReason ?? this.verifiedReason,
+      description: description ?? this.description,
+      followersCount: followersCount ?? this.followersCount,
+      followersCountStr: followersCountStr ?? this.followersCountStr,
+      friendsCount: friendsCount ?? this.friendsCount,
+      statusesCount: statusesCount ?? this.statusesCount,
+      location: location ?? this.location,
+      gender: gender ?? this.gender,
+      birthday: birthday ?? this.birthday,
+      coverImage: coverImage ?? this.coverImage,
+      coverImagePhone: coverImagePhone ?? this.coverImagePhone,
+    );
+  }
+
+  /// 存本地会话用（字段名与接口一致，fromJson 可直接读回）。
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'screen_name': screenName,
+    'avatar_large': avatar,
+    'verified': verified,
+    'verified_type': verifiedType,
+    'verified_reason': verifiedReason,
+    'description': description,
+    'followers_count': followersCount,
+    'followers_count_str': followersCountStr,
+    'friends_count': friendsCount,
+    'statuses_count': statusesCount,
+    'location': location,
+    'gender': gender,
+    'birthday': birthday,
+    'cover_image': coverImage,
+    'cover_image_phone': coverImagePhone,
+  };
 
   String get followersDisplay => followersCount > 0
       ? formatPlayCount(followersCount)
@@ -118,6 +186,9 @@ class WbUser {
       friendsCount: _intOf(j['friends_count']),
       statusesCount: _intOf(j['statuses_count']),
       location: _strOf(j['location']),
+      gender: _strOf(j['gender']),
+      birthday: _strOf(j['birthday']),
+      coverImage: httpsUrl(_strOf(j['cover_image'])),
       coverImagePhone: httpsUrl(_strOf(j['cover_image_phone'])),
     );
   }

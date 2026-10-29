@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/models.dart';
 import 'visitor_service.dart';
 
 /// 一条从 WebView 收割到的 Cookie（与 WebView 插件解耦的纯数据，便于单测）。
@@ -31,12 +32,18 @@ class SessionService extends ChangeNotifier {
   static const _keyUser = 'weiyue_session_user_v1';
   static const _keyProbe = 'weiyue_session_probe_v1';
   static const _keyExpired = 'weiyue_session_expired_v1';
+  static const _keyProfile = 'weiyue_session_profile_v1';
 
   /// domain -> {name: value}
   Map<String, Map<String, String>> _cookies = {};
   String _uid = '';
   String _screenName = '';
   String _avatar = '';
+
+  /// 本人完整资料（登录后补拉的 profile/info+detail 合并结果，
+  /// 只存解析后的字段，不存原始 JSON）；未拉到时为 null，
+  /// 账号区回退到头像+昵称的简版展示。
+  WbUser? _profile;
   bool? _pcUnlocked;
   bool? _mUnlocked;
   bool _expired = false;
@@ -55,6 +62,9 @@ class SessionService extends ChangeNotifier {
   String get uid => _uid;
   String get screenName => _screenName;
   String get avatar => _avatar;
+
+  /// 本人完整资料（未补拉到为 null）。
+  WbUser? get profile => _profile;
 
   static String normalizeDomain(String raw) {
     var d = raw.trim().toLowerCase();
@@ -150,6 +160,18 @@ class SessionService extends ChangeNotifier {
         }
       } catch (_) {}
     }
+    final profileRaw = prefs.getString(_keyProfile);
+    if (profileRaw != null && profileRaw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(profileRaw);
+        if (decoded is Map) {
+          final user = WbUser.fromJson(
+            decoded.map((k, v) => MapEntry('$k', v)),
+          );
+          if (user.id > 0 || user.screenName.isNotEmpty) _profile = user;
+        }
+      } catch (_) {}
+    }
     _expired = prefs.getBool(_keyExpired) ?? false;
   }
 
@@ -164,6 +186,11 @@ class SessionService extends ChangeNotifier {
       _keyProbe,
       jsonEncode({'pc': _pcUnlocked, 'm': _mUnlocked}),
     );
+    if (_profile != null) {
+      await prefs.setString(_keyProfile, jsonEncode(_profile!.toJson()));
+    } else {
+      await prefs.remove(_keyProfile);
+    }
     await prefs.setBool(_keyExpired, _expired);
   }
 
@@ -197,6 +224,18 @@ class SessionService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 保存本人完整资料（探活补拉/手动刷新后调用），并同步 uid/昵称/头像
+  /// 这组探活字段（账号区简版展示与资料头共用同一份最新数据）。
+  Future<void> saveProfile(WbUser user) async {
+    await init();
+    _profile = user;
+    if (user.id > 0) _uid = '${user.id}';
+    if (user.screenName.isNotEmpty) _screenName = user.screenName;
+    if (user.avatar.isNotEmpty) _avatar = user.avatar;
+    await _persist();
+    notifyListeners();
+  }
+
   /// 标记登录已过期（服务端明确未登录信号时由请求层调用）。
   /// 只改标记不删 Cookie：当前请求由请求层回退访客态完成，
   /// 账号区据此提示重新登录。
@@ -215,6 +254,7 @@ class SessionService extends ChangeNotifier {
     _uid = '';
     _screenName = '';
     _avatar = '';
+    _profile = null;
     _pcUnlocked = null;
     _mUnlocked = null;
     _expired = false;
@@ -223,6 +263,7 @@ class SessionService extends ChangeNotifier {
     await prefs.remove(_keyUser);
     await prefs.remove(_keyProbe);
     await prefs.remove(_keyExpired);
+    await prefs.remove(_keyProfile);
     notifyListeners();
   }
 }

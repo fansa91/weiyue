@@ -552,6 +552,27 @@ class WeiyueService {
     return _asMap(json['data']);
   }
 
+  /// 本人完整资料（登录后补全用）：profile/info 的 user 对象为主，
+  /// 再合并 profile/detail 的扩展字段（gender 性别、birthday 生日——
+  /// 文档 detail 结构明确，两者 info 里不一定有）。detail 拉取失败
+  /// 不影响主资料返回。
+  /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
+  Future<WbUser> getMyProfile(String uid) async {
+    var user = await getProfileInfo(uid);
+    try {
+      final detail = await getProfileDetail(uid);
+      final gender = '${detail['gender'] ?? ''}';
+      final birthday = '${detail['birthday'] ?? ''}';
+      user = user.copyWith(
+        gender: gender.isNotEmpty ? gender : user.gender,
+        birthday: birthday.isNotEmpty ? birthday : user.birthday,
+      );
+    } catch (_) {
+      // detail 失败只少两个扩展字段，主资料照常
+    }
+    return user;
+  }
+
   /// m 容器泛型请求，返回 data
   Future<Map<String, dynamic>> _container(
     Map<String, dynamic> query, {
@@ -1125,6 +1146,14 @@ class WeiyueService {
       );
       mOk = true;
     } catch (_) {}
+    // 探活末尾顺带补拉本人完整资料并持久化（资料头展示用）；
+    // 补拉失败不影响探活结论，账号区回退简版展示后可再自动/手动重拉。
+    if (user != null && user.id > 0) {
+      try {
+        final full = await getMyProfile('${user.id}');
+        await session.saveProfile(full);
+      } catch (_) {}
+    }
     return (user: user, pcUnlocked: pcOk, mUnlocked: mOk);
   }
 
@@ -1212,5 +1241,33 @@ class WeiyueService {
       items: items,
       total: totalRaw is num ? totalRaw.toInt() : items.length,
     );
+  }
+
+  /// 我关注的博主列表（登录后可用，访客回 `{}`）：
+  /// GET /ajax/friendships/friends?uid=&relate=follows&count=&page=
+  /// （WEIBO_API.md 被挡清单记载的确切路径；relate=fans 为粉丝列表）。
+  /// 登录态响应结构未实测，防御解析：用户数组依次找 data.users /
+  /// 顶层 users，总数依次找 data.total_number / 顶层 total_number。
+  /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
+  Future<({List<WbUser> users, int total})> getMyFollowing(
+    String uid, {
+    int page = 1,
+    int count = 20,
+  }) async {
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/friendships/friends',
+      query: {'uid': uid, 'relate': 'follows', 'count': count, 'page': page},
+      referer: 'https://weibo.com/u/$uid',
+    );
+    final data = _asMap(json['data']);
+    var raw = _asList(data['users']);
+    if (raw.isEmpty) raw = _asList(json['users']);
+    final users = raw
+        .map((e) => WbUser.fromJson(_asMap(e)))
+        .where((u) => u.id > 0)
+        .toList();
+    final totalRaw = data['total_number'] ?? json['total_number'];
+    return (users: users, total: _intOf(totalRaw));
   }
 }

@@ -121,6 +121,7 @@ class FakeVisitorService extends VisitorService {
 class FakeSessionService extends SessionService {
   bool loggedIn;
   bool expiredFlag;
+  WbUser? fakeProfile;
   FakeSessionService({this.loggedIn = false, this.expiredFlag = false});
 
   @override
@@ -128,6 +129,15 @@ class FakeSessionService extends SessionService {
 
   @override
   bool get expired => expiredFlag;
+
+  @override
+  WbUser? get profile => fakeProfile;
+
+  @override
+  Future<void> saveProfile(WbUser user) async {
+    fakeProfile = user;
+    notifyListeners();
+  }
 
   @override
   String get uid => loggedIn ? '777' : '';
@@ -370,6 +380,40 @@ class FakeWeiyueService extends WeiyueService {
         ? [makeStatus(id: 'fv1', text: '收藏的帖子一')]
         : const <WbStatus>[],
     total: 1,
+  );
+
+  /// 默认未配置：抛错让「我的」页保持简版账号卡（需要资料头的测试
+  /// 用子类覆盖返回完整资料）。
+  @override
+  Future<WbUser> getMyProfile(String uid) async =>
+      throw const WeiyueException('测试未配置本人资料');
+
+  @override
+  Future<({List<WbUser> users, int total})> getMyFollowing(
+    String uid, {
+    int page = 1,
+    int count = 20,
+  }) async => (
+    users: page == 1
+        ? const [
+            WbUser(
+              id: 5001,
+              screenName: '关注博主甲',
+              avatar: 'https://example.com/a.jpg',
+              description: '甲的简介',
+              followersCount: 2048,
+            ),
+            WbUser(
+              id: 5002,
+              screenName: '关注博主乙',
+              avatar: 'https://example.com/b.jpg',
+              verified: true,
+              verifiedType: 0,
+              followersCount: 99,
+            ),
+          ]
+        : const <WbUser>[],
+    total: 2,
   );
 
   @override

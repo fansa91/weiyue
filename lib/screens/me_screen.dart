@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/utils.dart';
+import '../models/models.dart';
 import '../services/session_service.dart';
 import '../services/visitor_service.dart';
+import '../services/weiyue_service.dart';
+import '../widgets/network_image.dart';
 import 'favorites_screen.dart';
+import 'following_screen.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
 import 'theme_screen.dart';
@@ -22,6 +26,10 @@ class MeScreen extends StatefulWidget {
 
 class _MeScreenState extends State<MeScreen> {
   bool _refreshing = false;
+  bool _profileLoading = false;
+
+  /// 已自动补拉过资料的 uid（失败后不反复自动重试，靠手动刷新入口）。
+  String _autoProfileUid = '';
 
   Future<void> _refreshVisitor() async {
     setState(() => _refreshing = true);
@@ -59,11 +67,75 @@ class _MeScreenState extends State<MeScreen> {
     }
   }
 
+  /// 本人 uid：探活字段优先，资料里的 id 兜底。
+  String _myUid(SessionService session) {
+    if (session.uid.isNotEmpty) return session.uid;
+    final p = session.profile;
+    return (p != null && p.id > 0) ? '${p.id}' : '';
+  }
+
+  /// 已登录但资料未补拉（或换了账号）时，帧后自动拉一次。
+  /// 只调度不直接 setState，实际加载在 [_loadProfile]。
+  void _maybeAutoLoadProfile(SessionService session) {
+    if (!session.isLoggedIn) {
+      _autoProfileUid = '';
+      return;
+    }
+    final uid = _myUid(session);
+    if (uid.isEmpty || _profileLoading) return;
+    final p = session.profile;
+    if (p != null && '${p.id}' == uid) return;
+    if (_autoProfileUid == uid) return;
+    _autoProfileUid = uid;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadProfile();
+    });
+  }
+
+  /// 拉本人完整资料并存会话；自动补拉失败静默（保持简版展示），
+  /// 手动刷新失败给提示。
+  Future<void> _loadProfile({bool manual = false}) async {
+    if (_profileLoading) return;
+    final session = context.read<SessionService>();
+    final uid = _myUid(session);
+    if (uid.isEmpty) return;
+    setState(() => _profileLoading = true);
+    try {
+      final user = await context.read<WeiyueService>().getMyProfile(uid);
+      await session.saveProfile(user);
+      if (manual && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('资料已更新')));
+      }
+    } catch (e) {
+      if (manual && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('资料刷新失败：$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _profileLoading = false);
+    }
+  }
+
+  void _openFollowing(String uid, {int total = 0}) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DetailScaffold(
+          child: FollowingScreen(uid: uid, initialTotal: total),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final visitor = context.watch<VisitorService>();
     final session = context.watch<SessionService>();
     final cs = Theme.of(context).colorScheme;
+    _maybeAutoLoadProfile(session);
+    final myUid = _myUid(session);
     return Scaffold(
       appBar: AppBar(title: const Text('我的'), centerTitle: false),
       body: ListView(
@@ -82,6 +154,18 @@ class _MeScreenState extends State<MeScreen> {
                       const DetailScaffold(child: FavoritesScreen()),
                 ),
               ),
+            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            ListTile(
+              leading: const Icon(Icons.people_outline),
+              title: const Text('我的关注'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: myUid.isEmpty
+                  ? null
+                  : () => _openFollowing(
+                      myUid,
+                      total: session.profile?.friendsCount ?? 0,
+                    ),
             ),
             const Divider(height: 1, indent: 16, endIndent: 16),
           ],
@@ -230,6 +314,10 @@ class _MeScreenState extends State<MeScreen> {
         ),
       );
     }
+    final profile = session.profile;
+    if (profile != null) {
+      return _buildProfileCard(context, session, profile);
+    }
     final name = session.screenName;
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12),
@@ -276,28 +364,231 @@ class _MeScreenState extends State<MeScreen> {
               ],
             ),
             const SizedBox(height: 10),
-            _unlockRow(context, '桌面端接口', session.pcUnlocked),
-            const SizedBox(height: 6),
-            _unlockRow(context, '移动端接口', session.mUnlocked),
-            if (session.expired) ...[
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Icon(Icons.warning_amber, size: 17, color: cs.error),
-                  const SizedBox(width: 6),
-                  const Expanded(
-                    child: Text('登录已过期，请重新登录', style: TextStyle(fontSize: 13)),
-                  ),
-                  FilledButton.tonal(
-                    onPressed: _openLogin,
-                    child: const Text('重新登录'),
-                  ),
-                ],
-              ),
-            ],
+            ..._sessionStatusRows(context, session),
           ],
         ),
       ),
+    );
+  }
+
+  /// 两栈解锁状态行 + 过期提示行（简版/资料头两个账号卡共用）。
+  List<Widget> _sessionStatusRows(
+    BuildContext context,
+    SessionService session,
+  ) {
+    final cs = Theme.of(context).colorScheme;
+    return [
+      _unlockRow(context, '桌面端接口', session.pcUnlocked),
+      const SizedBox(height: 6),
+      _unlockRow(context, '移动端接口', session.mUnlocked),
+      if (session.expired) ...[
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Icon(Icons.warning_amber, size: 17, color: cs.error),
+            const SizedBox(width: 6),
+            const Expanded(
+              child: Text('登录已过期，请重新登录', style: TextStyle(fontSize: 13)),
+            ),
+            FilledButton.tonal(
+              onPressed: _openLogin,
+              child: const Text('重新登录'),
+            ),
+          ],
+        ),
+      ],
+    ];
+  }
+
+  /// 资料头（已补拉到本人完整资料时）：封面 + 大头像 + 昵称/认证
+  /// + 认证说明/简介/所在地 + 关注/粉丝/动态三项计数（关注可点进关注列表）
+  /// + 刷新资料按钮；下方接两栈状态行。资料未拉到时用简版卡（见上）。
+  Widget _buildProfileCard(
+    BuildContext context,
+    SessionService session,
+    WbUser profile,
+  ) {
+    final cs = Theme.of(context).colorScheme;
+    final myUid = _myUid(session);
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (profile.bestCover.isNotEmpty)
+            SizedBox(
+              height: 92,
+              width: double.infinity,
+              child: NetImage(url: profile.bestCover, fit: BoxFit.cover),
+            ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CircleAvatar(
+                      radius: 30,
+                      backgroundImage: profile.avatar.isNotEmpty
+                          ? NetworkImage(profile.avatar)
+                          : null,
+                      child: profile.avatar.isEmpty
+                          ? const Icon(Icons.person, size: 30)
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  profile.screenName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              if (profile.verified) ...[
+                                const SizedBox(width: 4),
+                                Icon(
+                                  Icons.verified,
+                                  size: 17,
+                                  color: profile.verifiedType == 3
+                                      ? const Color(0xFFF5A623)
+                                      : cs.primary,
+                                ),
+                              ],
+                            ],
+                          ),
+                          if (profile.verifiedReason.isNotEmpty)
+                            Text(
+                              profile.verifiedReason,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                          if (profile.description.isNotEmpty)
+                            Text(
+                              profile.description,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                          if (profile.location.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.location_on_outlined,
+                                  size: 14,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 3),
+                                Text(
+                                  profile.location,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: cs.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '刷新资料',
+                      onPressed: _profileLoading
+                          ? null
+                          : () => _loadProfile(manual: true),
+                      icon: _profileLoading
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.refresh, size: 20),
+                    ),
+                    TextButton(onPressed: _logout, child: const Text('退出登录')),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    _stat(
+                      context,
+                      '关注',
+                      profile.friendsCount,
+                      onTap: myUid.isEmpty
+                          ? null
+                          : () => _openFollowing(
+                              myUid,
+                              total: profile.friendsCount,
+                            ),
+                    ),
+                    _stat(context, '粉丝', profile.followersCount),
+                    _stat(context, '动态', profile.statusesCount),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                ..._sessionStatusRows(context, session),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 资料头计数：数值（紧凑格式化）在上、标签在下；有关注页入口时可点。
+  Widget _stat(
+    BuildContext context,
+    String label,
+    int value, {
+    VoidCallback? onTap,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final body = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            formatPlayCount(value),
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          ),
+          Text(
+            label,
+            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(right: 28),
+      child: onTap == null
+          ? body
+          : InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(8),
+              child: body,
+            ),
     );
   }
 
