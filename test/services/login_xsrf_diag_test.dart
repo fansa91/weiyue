@@ -373,7 +373,7 @@ void main() {
         (f) => f.endpoint == '/ajax/setting/getBasicInfo',
       );
       expect(basic, isNotEmpty);
-      expect(basic.first.message, contains('接口返回非 JSON（HTTP 400）'));
+      expect(basic.first.message, contains('接口返回非 JSON（HTTP 400，HTML）'));
       expect(
         session.recentLoginFailures.map((f) => f.endpoint),
         contains('/ajax/feed/friendstimeline'),
@@ -399,7 +399,7 @@ void main() {
       );
       expect(
         session.recentLoginFailures.first.message,
-        contains('接口返回非 JSON（HTTP 400）'),
+        contains('接口返回非 JSON（HTTP 400，HTML）'),
       );
     });
 

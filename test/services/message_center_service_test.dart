@@ -19,6 +19,10 @@ import '../helpers/fakes.dart';
 /// reply_comment/status、赞的 comment/status）。全部为按此结构构造
 /// 的假数据（非真实抓取），Cookie 均为 FAKE_* 合成串；
 /// 登录态真实返回结构待用户真机验证。
+/// unreadHint 自 2026-11-10 修复起必带 group_ids（主包调用点实证，
+/// 缺参回 HTTP 200 网页 HTML）：分组经 allGroups 关注分组段取
+/// （message_all_groups.json 按样本 pc_allGroups 结构构造）。
+/// 非 JSON 报错带正文指纹（bodyFingerprint）也在本文件覆盖。
 class CountingVisitor extends VisitorService {
   static const _id = VisitorIdentity('VSUB', 'VSUBP', 1793000000000);
 
@@ -206,6 +210,9 @@ void main() {
 
   test('未读汇总：unreadHint 分类键解析，groups 的 gid 不计入分类', () async {
     final adapter = FakeAdapter((opt) async {
+      if (opt.uri.path.endsWith('allGroups')) {
+        return jsonBody(_fixture('message_all_groups.json'));
+      }
       if (opt.uri.path.endsWith('unreadHint')) {
         return jsonBody(_fixture('message_unread_hint.json'));
       }
@@ -225,6 +232,9 @@ void main() {
 
   test('未读汇总：只有 summary 的互动量形态时分类全零、不抛错', () async {
     final adapter = FakeAdapter((opt) async {
+      if (opt.uri.path.endsWith('allGroups')) {
+        return jsonBody(_fixture('message_all_groups.json'));
+      }
       if (opt.uri.path.endsWith('unreadHint')) return jsonBody({'ok': 1});
       return jsonBody(_fixture('message_summary.json'));
     });
@@ -252,5 +262,138 @@ void main() {
       session.recentLoginFailures.map((f) => f.endpoint),
       contains('/ajax/message/msgList'),
     );
+  });
+
+  test('未读汇总：unreadHint 带 group_ids（关注分组 gid、频道不混入），分组只拉一次', () async {
+    final adapter = FakeAdapter((opt) async {
+      if (opt.uri.path.endsWith('allGroups')) {
+        return jsonBody(_fixture('message_all_groups.json'));
+      }
+      if (opt.uri.path.endsWith('unreadHint')) {
+        return jsonBody(_fixture('message_unread_hint.json'));
+      }
+      return jsonBody(_fixture('message_summary.json'));
+    });
+    final svc = await _svc(adapter);
+
+    final u = await svc.getMessageSummary();
+    // 带参后解析结果与分类键用例一致，不回退
+    expect(u.total, 11);
+
+    // 请求先后：allGroups → unreadHint → summary
+    expect(adapter.requests.map((r) => r.uri.path).toList(), [
+      '/ajax/feed/allGroups',
+      '/ajax/message/unreadHint',
+      '/ajax/message/summary',
+    ]);
+    // group_ids 只含关注分组段（group_type=0）的 gid，频道段
+    // （group_type=1 / type=8888）的 102803 等不混入
+    expect(
+      adapter.requests[1].queryParameters['group_ids'],
+      '100011641537045,110001641537045,100051641537045',
+    );
+
+    // 第二次汇总：分组走会话缓存，不再拉 allGroups
+    await svc.getMessageSummary();
+    final allGroupsCalls = adapter.requests
+        .where((r) => r.uri.path.endsWith('allGroups'))
+        .length;
+    expect(allGroupsCalls, 1);
+  });
+
+  test('未读汇总：allGroups 拉取失败时跳过 unreadHint、不记失败，summary 照常', () async {
+    final session = await _sessionWithCookies();
+    final adapter = FakeAdapter((opt) async {
+      if (opt.uri.path.endsWith('allGroups')) {
+        return jsonBody('<html><body>Bad Request</body></html>', status: 400);
+      }
+      if (opt.uri.path.endsWith('unreadHint')) {
+        return jsonBody(_fixture('message_unread_hint.json'));
+      }
+      return jsonBody(_fixture('message_summary.json'));
+    });
+    final svc = await _svc(adapter, session: session);
+
+    final u = await svc.getMessageSummary();
+    // summary 只有互动量形态：分类全零；unreadHint 根本没被调用
+    expect(u.total, 0);
+    expect(adapter.requests.map((r) => r.uri.path).toList(), [
+      '/ajax/feed/allGroups',
+      '/ajax/message/summary',
+    ]);
+    // 跳过 unreadHint 不记失败，分组拉取失败也不记
+    expect(session.recentLoginFailures, isEmpty);
+  });
+
+  test('非 JSON（200 HTML）：异常消息带正文指纹（网页标题）', () async {
+    // 真实错误页是 text/html：dio 不预解码、正文以 String 到达 _get，
+    // 才能走指纹路径（jsonBody 的 application/json 头会让 dio 先在
+    // 解码层抛错，与真机不符，故此处直接构造 text/html 响应）。
+    final adapter = FakeAdapter(
+      (opt) async => ResponseBody.fromString(
+        '<html><head><title>安全验证</title></head><body>verify</body></html>',
+        200,
+        headers: {
+          Headers.contentTypeHeader: ['text/html; charset=utf-8'],
+        },
+      ),
+    );
+    final svc = await _svc(adapter);
+
+    await expectLater(
+      svc.getMessageFeed(),
+      throwsA(
+        isA<WeiyueException>().having(
+          (e) => e.message,
+          'message',
+          contains('接口返回非 JSON（HTTP 200，网页标题：安全验证）'),
+        ),
+      ),
+    );
+  });
+
+  group('bodyFingerprint 正文指纹（纯函数）', () {
+    test('带 title 的 HTML：取标题文本', () {
+      expect(
+        WeiyueService.bodyFingerprint(
+          '<html><head><title>微博 - 随时随地发现新鲜事</title></head>'
+          '<body>x</body></html>',
+        ),
+        '网页标题：微博 - 随时随地发现新鲜事',
+      );
+    });
+
+    test('title 清洗空白/控制字符并截断 40 字', () {
+      final fp = WeiyueService.bodyFingerprint(
+        '<title>  ${'长' * 50}\n\t标题 </title>',
+      );
+      expect(fp, '网页标题：${'长' * 40}');
+    });
+
+    test('无 title：命中登录关键词', () {
+      expect(
+        WeiyueService.bodyFingerprint(
+          '<html><body>请先登录再操作</body></html>',
+        ),
+        '关键词：登录',
+      );
+    });
+
+    test('无 title：验证关键词优先于安全', () {
+      expect(
+        WeiyueService.bodyFingerprint(
+          '<html><body>安全验证：请完成验证</body></html>',
+        ),
+        '关键词：验证',
+      );
+    });
+
+    test('无线索 HTML 回 HTML，空正文回空正文', () {
+      expect(
+        WeiyueService.bodyFingerprint('<html><body>Bad Request</body></html>'),
+        'HTML',
+      );
+      expect(WeiyueService.bodyFingerprint('   '), '空正文');
+    });
   });
 }

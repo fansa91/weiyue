@@ -85,6 +85,49 @@ class WeiyueService {
     return false;
   }
 
+  /// 非 JSON 响应正文指纹（纯函数）：服务端回网页（HTML）而非接口
+  /// JSON 时，从正文里提取人类可读线索，让报错与诊断记录能直接
+  /// 看出「那页是什么」。优先 <title> 文本；无 title 时按关键词
+  /// 归类（登录/验证/安全/微博）；都没有回 'HTML'，空正文回
+  /// '空正文'。指纹只来自服务端公开错误页文本，绝不含请求数据、
+  /// Cookie 或令牌；文本做控制字符清洗、空白折叠与 40 字截断。
+  static String bodyFingerprint(String body) {
+    if (body.trim().isEmpty) return '空正文';
+    final title = RegExp(
+      r'<title[^>]*>([\s\S]*?)</title>',
+      caseSensitive: false,
+    ).firstMatch(body);
+    if (title != null) {
+      final text = _cleanFingerprintText(
+        title.group(1)!.replaceAll(RegExp(r'<[^>]*>'), ' '),
+      );
+      if (text.isNotEmpty) return '网页标题：$text';
+    }
+    final lower = body.toLowerCase();
+    const keywordGroups = <List<String>>[
+      ['登录', 'login', 'passport', 'sso'],
+      ['验证', 'captcha', 'verify'],
+      ['安全', 'security'],
+      ['微博', 'weibo'],
+    ];
+    const labels = ['登录', '验证', '安全', '微博'];
+    for (var i = 0; i < keywordGroups.length; i++) {
+      if (keywordGroups[i].any(lower.contains)) {
+        return '关键词：${labels[i]}';
+      }
+    }
+    return 'HTML';
+  }
+
+  /// 指纹文本清洗：去控制字符、折叠空白、按 rune 截断 40 字。
+  static String _cleanFingerprintText(String s) {
+    final noCtrl = s.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), ' ');
+    final collapsed = noCtrl.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final runes = collapsed.runes;
+    if (runes.length <= 40) return collapsed;
+    return String.fromCharCodes(runes.take(40));
+  }
+
   /// 决定本次请求用哪份 Cookie：登录会话优先；[sessionOnly] 时
   /// 只许登录态（探活用，不回退访客，避免把访客结果误判成登录解锁）。
   /// [retried] 表示已是回退重试，强制走访客，防止循环。
@@ -186,7 +229,9 @@ class WeiyueService {
       throw const WeiyueException('访客身份失效，重试后仍被拦截');
     }
     if (json == null) {
-      throw WeiyueException('接口返回非 JSON（HTTP $status）');
+      throw WeiyueException(
+        '接口返回非 JSON（HTTP $status，${bodyFingerprint(rawBody)}）',
+      );
     }
     return json;
   }
@@ -263,12 +308,19 @@ class WeiyueService {
   }
 
   /// 剥掉 JSONP 外层括号再解码（getItem 实测返回 `({...})`）。
+  /// 解码失败（服务端回了网页 HTML 等）抛带正文指纹的
+  /// WeiyueException，不再让裸 FormatException 冒出去。
   static Map<String, dynamic> _decodeJsonp(String body) {
     var t = body.trim();
     if (t.startsWith('(') && t.endsWith(')')) {
       t = t.substring(1, t.length - 1);
     }
-    final d = jsonDecode(t);
+    final dynamic d;
+    try {
+      d = jsonDecode(t);
+    } on FormatException {
+      throw WeiyueException('接口返回非 JSON（${bodyFingerprint(body)}）');
+    }
     return d is Map ? _asMap(d) : const {};
   }
 
@@ -357,6 +409,10 @@ class WeiyueService {
 
   ({List<WbChannel> mine, List<WbChannel> recommended})? _channelsCache;
 
+  /// 关注分组 gid 缓存（unreadHint 的 group_ids 参数用）：会话内
+  /// 成功拉到一次即缓存；失败/为空不缓存，下次调用可重试。
+  List<String>? _followGroupGidsCache;
+
   Future<({List<WbChannel> mine, List<WbChannel> recommended})>
   getChannels() async {
     final cached = _channelsCache;
@@ -392,6 +448,38 @@ class WeiyueService {
       mine: fallbackChannels,
       recommended: const <WbChannel>[],
     );
+  }
+
+  /// 取关注分组 gid 列表（unreadHint 的 group_ids 参数来源）：
+  /// GET /ajax/feed/allGroups 的 groups 分段中，group_type==0 的是
+  /// 登录侧关注分组段（默认分组/我的分组/订阅分组，样本
+  /// pc_allGroups 实证），group_type==1 的两段是频道（我的频道/
+  /// 频道推荐）；取舍按段类型走，再以条目 type!=8888 双保险，
+  /// 频道 gid 绝不混入。段缺 group_type 时靠条目 type 兜底判断。
+  Future<List<String>> _followGroupGids() async {
+    final cached = _followGroupGidsCache;
+    if (cached != null) return cached;
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/feed/allGroups',
+      query: {'is_new_segment': 1, 'fetch_hot': 1},
+    );
+    final gids = <String>[];
+    final seen = <String>{};
+    for (final seg in _asList(json['groups'])) {
+      final sm = _asMap(seg);
+      final gt = sm['group_type'];
+      if (gt != null && _intOf(gt) != 0) continue; // 频道段整段跳过
+      for (final item in _asList(sm['group'])) {
+        final im = _asMap(item);
+        if ('${im['type'] ?? ''}' == '8888') continue; // 频道条目双保险
+        final gid = '${im['gid'] ?? ''}'.trim();
+        if (gid.isEmpty || gid == 'null' || !seen.add(gid)) continue;
+        gids.add(gid);
+      }
+    }
+    if (gids.isNotEmpty) _followGroupGidsCache = gids;
+    return gids;
   }
 
   /// 按名找分类（视频页签用）：先查缓存/接口结果，再查内置表。
@@ -1705,9 +1793,18 @@ class WeiyueService {
     );
   }
 
-  /// 消息未读汇总：GET /ajax/message/unreadHint + /ajax/message/summary
-  /// 多形态防御提取。本方法不抛错（徽标拉取失败只记诊断、返回已提取
-  /// 部分或全零），避免拖垮「我的」页与消息中心页签渲染。
+  /// 消息未读汇总：GET /ajax/message/unreadHint（必带 group_ids）
+  /// + /ajax/message/summary 多形态防御提取。本方法不抛错（徽标
+  /// 拉取失败只记诊断、返回已提取部分或全零），避免拖垮「我的」页
+  /// 与消息中心页签渲染。
+  ///
+  /// unreadHint 必带参数 group_ids（关注分组 gid 逗号拼接）：网页端
+  /// 主包调用点实证（2026-11-10，主包原码 $http.get(unreadHint,
+  /// {params:{group_ids: gids.join(",")}})，gid 来源为 allGroups
+  /// 关注分组段）；缺参时服务端回 HTTP 200 的网页 HTML 非 JSON
+  /// （真机实证）。分组经 [_followGroupGids] 取（会话内缓存）；
+  /// 分组拉取失败或无 gid 时跳过 unreadHint 这一路——不调、
+  /// 不记失败，summary 那一路照旧。
   ///
   /// 依据等级：unreadHint 的 groups 形态（[{键: 数}]）与 summary 的
   /// {summary:{topUsers/followers/field}} 形态为主包实证，但 summary
@@ -1725,19 +1822,32 @@ class WeiyueService {
       for (final g in _asList(m['groups'])) {
         absorb(_asMap(g));
       }
-      absorb(_asMap(m['unread']));
+      // 只在 unread 真是 Map 时才下钻：原先无条件 absorb(_asMap(null))
+      // 会对空 Map 无限递归抛 Stack Overflow（被外层 catch 吞掉并误记
+      // 一条失败记录，分类值因先行吸收才没受影响）。
+      final unread = m['unread'];
+      if (unread is Map) absorb(_asMap(unread));
     }
 
+    List<String> gids;
     try {
-      final hint = await _get(
-        WbStack.pc,
-        '$_pcBase/ajax/message/unreadHint',
-        referer: 'https://weibo.com/messages',
-      );
-      absorb(_asMap(hint['data']));
-      absorb(hint);
-    } catch (e) {
-      session.recordLoginFailure('/ajax/message/unreadHint', '$e');
+      gids = await _followGroupGids();
+    } catch (_) {
+      gids = const []; // 分组拉取失败：跳过 unreadHint，不记失败
+    }
+    if (gids.isNotEmpty) {
+      try {
+        final hint = await _get(
+          WbStack.pc,
+          '$_pcBase/ajax/message/unreadHint',
+          query: {'group_ids': gids.join(',')},
+          referer: 'https://weibo.com/messages',
+        );
+        absorb(_asMap(hint['data']));
+        absorb(hint);
+      } catch (e) {
+        session.recordLoginFailure('/ajax/message/unreadHint', '$e');
+      }
     }
     try {
       final sum = await _get(
@@ -1835,7 +1945,8 @@ class WeiyueService {
       throw const WeiyueException(msg);
     }
     if (json == null) {
-      final msg = '接口返回非 JSON（HTTP $status）';
+      final msg =
+          '接口返回非 JSON（HTTP $status，${bodyFingerprint(rawBody)}）';
       session.recordLoginFailure(path, msg);
       throw WeiyueException(msg);
     }

@@ -358,7 +358,7 @@ void main() {
       );
     });
 
-    test('400 非 JSON：抛「接口返回非 JSON（HTTP 400）」', () async {
+    test('400 非 JSON：抛带正文指纹的「接口返回非 JSON（HTTP 400，HTML）」', () async {
       final adapter = _CaptureAdapter((opt) async => _html400());
       final svc = WeiyueService(
         _Visitor(),
@@ -371,7 +371,7 @@ void main() {
           isA<WeiyueException>().having(
             (e) => e.message,
             'message',
-            '接口返回非 JSON（HTTP 400）',
+            '接口返回非 JSON（HTTP 400，HTML）',
           ),
         ),
       );
