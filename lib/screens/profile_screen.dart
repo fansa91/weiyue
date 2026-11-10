@@ -31,6 +31,11 @@ class _ProfileScreenState extends State<ProfileScreen>
   String? _error;
   List<WbPlaylist> _playlists = const [];
 
+  /// 前四个分页页签（动态/视频/精选/文章）的状态键：分页续拉改由
+  /// 外层滚动通知按当前页签分发（见 _onTabBodyScroll），不再靠各
+  /// 页签自有 ScrollController 的监听。
+  final _tabKeys = List.generate(4, (_) => GlobalKey<_PagedStatusesState>());
+
   /// 关注态：初始取 user.following，点击乐观切换、失败回滚。
   bool _following = false;
   bool _followBusy = false;
@@ -64,6 +69,18 @@ class _ProfileScreenState extends State<ProfileScreen>
       final playlists = await svc.getVideoTab(widget.uid);
       if (mounted) setState(() => _playlists = playlists);
     } catch (_) {}
+  }
+
+  /// 页签内层列表接近底部（剩余不足 500px，与旧自有控制器监听的
+  /// 阈值一致）时，给当前页签续拉一页；相册页签不分页，忽略。
+  /// _PagedStatuses.loadMore 内部有防重入与到底标记，滚动通知
+  /// 连发不会重复请求。
+  bool _onTabBodyScroll(ScrollNotification n) {
+    if (n is ScrollUpdateNotification && n.metrics.extentAfter < 500) {
+      final i = _tabController.index;
+      if (i < _tabKeys.length) _tabKeys[i].currentState?.loadMore();
+    }
+    return false;
   }
 
   /// 关注/取关切换：乐观翻转本地状态，失败回滚并弹服务端消息；
@@ -200,42 +217,47 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ),
                 ),
               ],
-              body: TabBarView(
-                controller: _tabController,
-                children: [
-                  _PagedStatuses(
-                    key: ValueKey('wb_${widget.uid}'),
-                    loader: (page) => context
-                        .read<WeiyueService>()
-                        .getUserStatuses(widget.uid, page: page)
-                        .then((r) => r.statuses),
-                  ),
-                  _PagedStatuses(
-                    key: ValueKey('vd_${widget.uid}'),
-                    loader: (page) => context
-                        .read<WeiyueService>()
-                        .getUserVideos(widget.uid, page: page)
-                        .then((r) => r.statuses),
-                    header: _playlists.isEmpty
-                        ? null
-                        : _buildPlaylists(context),
-                  ),
-                  _PagedStatuses(
-                    key: ValueKey('ft_${widget.uid}'),
-                    loader: (page) => context
-                        .read<WeiyueService>()
-                        .getUserFeatured(widget.uid, page: page)
-                        .then((r) => r.statuses),
-                  ),
-                  _PagedStatuses(
-                    key: ValueKey('ar_${widget.uid}'),
-                    loader: (page) => context
-                        .read<WeiyueService>()
-                        .getUserArticles(widget.uid, page: page)
-                        .then((r) => r.statuses),
-                  ),
-                  _AlbumTab(uid: widget.uid),
-                ],
+              // 通知监听只裹 body：页签内层列表接近底部时按当前页签
+              // 分发续拉；表头自身的收起/展开滚动不经过这里。
+              body: NotificationListener<ScrollNotification>(
+                onNotification: _onTabBodyScroll,
+                child: TabBarView(
+                  controller: _tabController,
+                  children: [
+                    _PagedStatuses(
+                      key: _tabKeys[0],
+                      loader: (page) => context
+                          .read<WeiyueService>()
+                          .getUserStatuses(widget.uid, page: page)
+                          .then((r) => r.statuses),
+                    ),
+                    _PagedStatuses(
+                      key: _tabKeys[1],
+                      loader: (page) => context
+                          .read<WeiyueService>()
+                          .getUserVideos(widget.uid, page: page)
+                          .then((r) => r.statuses),
+                      header: _playlists.isEmpty
+                          ? null
+                          : _buildPlaylists(context),
+                    ),
+                    _PagedStatuses(
+                      key: _tabKeys[2],
+                      loader: (page) => context
+                          .read<WeiyueService>()
+                          .getUserFeatured(widget.uid, page: page)
+                          .then((r) => r.statuses),
+                    ),
+                    _PagedStatuses(
+                      key: _tabKeys[3],
+                      loader: (page) => context
+                          .read<WeiyueService>()
+                          .getUserArticles(widget.uid, page: page)
+                          .then((r) => r.statuses),
+                    ),
+                    _AlbumTab(uid: widget.uid),
+                  ],
+                ),
               ),
             ),
     );
@@ -405,8 +427,10 @@ class _ProfileScreenState extends State<ProfileScreen>
   );
 
   Widget _count(String label, int value) {
+    // 间距 16：22 时三项计数在 400px 窄屏下恰好溢出 1px（测试字体
+    // 更宽时尤甚），收紧一点不影响观感。
     return Padding(
-      padding: const EdgeInsets.only(right: 22),
+      padding: const EdgeInsets.only(right: 16),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -449,6 +473,18 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
   bool shouldRebuild(_TabBarDelegate old) => old.tabBar != tabBar;
 }
 
+/// 页签加载/空态占位：一支只含 SliverFillRemaining 的可滚动视图。
+/// NestedScrollView 的 body 必须是可滚动体，手势才能在内外层
+/// 之间接力（下拉回资料头）；裸 Center 不是滚动体，手势会断链
+/// （与帖子详情页 _tabPlaceholder 同款做法）。
+Widget _tabPlaceholder(Widget child) {
+  return CustomScrollView(
+    slivers: [
+      SliverFillRemaining(hasScrollBody: false, child: Center(child: child)),
+    ],
+  );
+}
+
 /// m 容器分页微博列表（page 递增，空页结束）
 class _PagedStatuses extends StatefulWidget {
   final Future<List<WbStatus>> Function(int page) loader;
@@ -459,30 +495,28 @@ class _PagedStatuses extends StatefulWidget {
   State<_PagedStatuses> createState() => _PagedStatusesState();
 }
 
-class _PagedStatusesState extends State<_PagedStatuses> {
-  final _scroll = ScrollController();
+class _PagedStatusesState extends State<_PagedStatuses>
+    with AutomaticKeepAliveClientMixin {
   final List<WbStatus> _items = [];
   int _page = 1;
   bool _loading = true;
   bool _loadingMore = false;
   bool _ended = false;
 
+  /// 切页签时保活：已加载条目与分页进度不丢（TabBarView 默认会
+  /// 销毁离屏页签的状态，回来又从第一页重拉）。
+  @override
+  bool get wantKeepAlive => true;
+
   @override
   void initState() {
     super.initState();
-    _scroll.addListener(() {
-      if (_scroll.position.pixels >= _scroll.position.maxScrollExtent - 500) {
-        _loadMore();
-      }
-    });
     _loadFirst();
   }
 
-  @override
-  void dispose() {
-    _scroll.dispose();
-    super.dispose();
-  }
+  /// 供外层滚动通知调用的续拉入口（替代旧自有 ScrollController
+  /// 的位置监听）：实际防重入/到底判断都在 _loadMore 里。
+  void loadMore() => _loadMore();
 
   Future<void> _loadFirst() async {
     try {
@@ -520,12 +554,15 @@ class _PagedStatusesState extends State<_PagedStatuses> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    // 宽屏瀑布流/窄屏单列与其它列表共用 ResponsiveStatusList；
-    // 本列表挂在 NestedScrollView 的 TabBarView 里，作内层滚动视图。
+    super.build(context); // AutomaticKeepAliveClientMixin 要求
+    if (_loading) return _tabPlaceholder(const CircularProgressIndicator());
+    // 宽屏瀑布流/窄屏单列与其它列表共用 ResponsiveStatusList。
+    // 关键：不给列表传自有 ScrollController——NestedScrollView 只
+    // 协调使用其内置主控制器的内层滚动体；自有控制器会让内层
+    // 独立滚动，外层资料头永远不收起、到顶下拉也不接力回来
+    // （帖子详情页同款问题的另一触发点，见 detail 修复 6a9a709）。
     return ResponsiveStatusList(
       items: _items,
-      controller: _scroll,
       header: widget.header,
       footer: Padding(
         padding: const EdgeInsets.all(16),
@@ -553,9 +590,13 @@ class _AlbumTab extends StatefulWidget {
   State<_AlbumTab> createState() => _AlbumTabState();
 }
 
-class _AlbumTabState extends State<_AlbumTab> {
+class _AlbumTabState extends State<_AlbumTab>
+    with AutomaticKeepAliveClientMixin {
   List<List<WbPic>> _groups = const [];
   bool _loading = true;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -591,7 +632,8 @@ class _AlbumTabState extends State<_AlbumTab> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) return const Center(child: CircularProgressIndicator());
+    super.build(context); // AutomaticKeepAliveClientMixin 要求
+    if (_loading) return _tabPlaceholder(const CircularProgressIndicator());
     // 相册宫格用图档位跟随设置；改设置后宫格即时重建换档。
     final imageQuality =
         context.watch<SettingsService>().imageQuality;
@@ -602,7 +644,7 @@ class _AlbumTabState extends State<_AlbumTab> {
         flat.add((g, i));
       }
     }
-    if (flat.isEmpty) return const Center(child: Text('暂无图片'));
+    if (flat.isEmpty) return _tabPlaceholder(const Text('暂无图片'));
     return GridView.builder(
       padding: const EdgeInsets.all(6),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
