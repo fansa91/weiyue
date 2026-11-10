@@ -285,6 +285,57 @@ class _DetailScreenState extends State<DetailScreen>
     }
   }
 
+  /// 删自己的评论（[parent] 非空时 [target] 是它的楼中楼回复）：
+  /// 先确认，成功才从本地列表摘除并同步总数-1；失败弹服务端
+  /// 消息、条目保留。入口只对本人评论出现（见 _buildComments）。
+  Future<void> _deleteComment(WbComment target, {WbComment? parent}) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除评论'),
+        content: const Text('删除这条评论？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await context.read<WeiyueService>().deleteComment(target.id);
+    } catch (e) {
+      _snack('$e');
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      if (parent == null) {
+        _comments = _comments.where((c) => c.id != target.id).toList();
+      } else {
+        _comments = [
+          for (final c in _comments)
+            if (c.id == parent.id)
+              c.copyWith(
+                replies: c.replies.where((r) => r.id != target.id).toList(),
+              )
+            else
+              c,
+        ];
+      }
+      if (_commentTotal > 0) _commentTotal -= 1;
+      if (_status.commentsCount > 0) {
+        _status = _status.copyWith(commentsCount: _status.commentsCount - 1);
+      }
+    });
+    _snack('评论已删除');
+  }
+
   /// 帖子正文（窄屏与宽屏左栏共用）。视频帖在卡内封面位置
   /// 换成内嵌播放器，进入详情即按设置自动播放预览。
   List<Widget> _buildStatusOnly(BuildContext context) {
@@ -296,6 +347,11 @@ class _DetailScreenState extends State<DetailScreen>
         onCommentTap: () => _composeComment(),
         onStatusChanged: (s) {
           if (mounted) setState(() => _status = s);
+        },
+        // 本人帖子删成功：以被删 id 作路由返回值关页，
+        // 来源侧（openDetail）统一提示「动态已删除」。
+        onDeleted: (_) {
+          if (mounted) Navigator.of(context).pop(_status.id);
         },
         videoOverride: _status.hasVideo
             ? InlineVideoPlayer(
@@ -617,6 +673,11 @@ class _DetailScreenState extends State<DetailScreen>
     if (_commentsLoading) {
       return _tabPlaceholder(const Center(child: CircularProgressIndicator()));
     }
+    // 删除入口只给本人的评论/回复：登录 uid 与评论作者 id 对上才算。
+    final session = context.read<SessionService>();
+    final myUid = loggedIn ? session.uid : '';
+    bool isMine(WbComment c) =>
+        myUid.isNotEmpty && c.user != null && '${c.user!.id}' == myUid;
     final sorted = _sortedComments();
     final hasMore = _commentMaxId != 0 && _comments.length < _commentTotal;
     return ListView(
@@ -649,7 +710,13 @@ class _DetailScreenState extends State<DetailScreen>
             child: Center(child: Text('暂无评论')),
           ),
         for (final c in sorted)
-          _CommentTile(comment: c, onReply: (t) => _composeComment(replyTo: t)),
+          _CommentTile(
+            comment: c,
+            onReply: (t) => _composeComment(replyTo: t),
+            onDelete: isMine(c) ? () => _deleteComment(c) : null,
+            replyDeleteFor: (r) =>
+                isMine(r) ? () => _deleteComment(r, parent: c) : null,
+          ),
         if (hasMore)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 10),
@@ -733,7 +800,19 @@ class _CommentTile extends StatelessWidget {
   /// 点「回复」（含楼中楼里的回复）时回调，目标为被回复的那条评论。
   final ValueChanged<WbComment>? onReply;
 
-  const _CommentTile({required this.comment, this.onReply});
+  /// 点「删除」时回调（仅本人评论时由详情页传入，他人评论为 null
+  /// 不出现入口）。
+  final VoidCallback? onDelete;
+
+  /// 楼中楼回复的删除回调工厂：逐条按作者决定是否给删除入口。
+  final VoidCallback? Function(WbComment reply)? replyDeleteFor;
+
+  const _CommentTile({
+    required this.comment,
+    this.onReply,
+    this.onDelete,
+    this.replyDeleteFor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -828,6 +907,21 @@ class _CommentTile extends StatelessWidget {
                           ),
                         ),
                       ),
+                    if (onDelete != null)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(4),
+                        onTap: onDelete,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          child: Text(
+                            '删除',
+                            style: TextStyle(fontSize: 12.5, color: cs.error),
+                          ),
+                        ),
+                      ),
                   ],
                 ),
                 // 楼中楼：接口内嵌的 replies 缩进展示（无独立楼层接口，只这一层）
@@ -843,7 +937,11 @@ class _CommentTile extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         for (final r in comment.replies)
-                          _ReplyTile(reply: r, onReply: onReply),
+                          _ReplyTile(
+                            reply: r,
+                            onReply: onReply,
+                            onDelete: replyDeleteFor?.call(r),
+                          ),
                       ],
                     ),
                   ),
@@ -865,7 +963,10 @@ class _ReplyTile extends StatelessWidget {
   /// 点「回复」时回调，目标为本条回复自身。
   final ValueChanged<WbComment>? onReply;
 
-  const _ReplyTile({required this.reply, this.onReply});
+  /// 点「删除」时回调（仅本人回复时传入，他人回复为 null 不出现）。
+  final VoidCallback? onDelete;
+
+  const _ReplyTile({required this.reply, this.onReply, this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -929,6 +1030,21 @@ class _ReplyTile extends StatelessWidget {
                           child: Text(
                             '回复',
                             style: TextStyle(fontSize: 12, color: cs.primary),
+                          ),
+                        ),
+                      ),
+                    if (onDelete != null)
+                      InkWell(
+                        borderRadius: BorderRadius.circular(4),
+                        onTap: onDelete,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          child: Text(
+                            '删除',
+                            style: TextStyle(fontSize: 12, color: cs.error),
                           ),
                         ),
                       ),

@@ -11,6 +11,8 @@ import '../services/settings_service.dart';
 import '../core/utils.dart';
 import '../models/models.dart';
 import '../services/download_service.dart';
+import '../services/session_service.dart';
+import '../services/weiyue_service.dart';
 import 'cover_image.dart';
 import 'download_button.dart';
 import 'interactions.dart';
@@ -143,6 +145,10 @@ class StatusCard extends StatelessWidget {
   /// 详情页据此同步页签计数；列表卡可不传。
   final ValueChanged<WbStatus>? onStatusChanged;
 
+  /// 本人帖子「删除动态」成功后的回调（详情页据此关页返回）；
+  /// 不传时删后只弹「动态已删除」提示，列表侧随下次刷新消失。
+  final ValueChanged<WbStatus>? onDeleted;
+
   const StatusCard({
     super.key,
     required this.status,
@@ -152,12 +158,19 @@ class StatusCard extends StatelessWidget {
     this.downloadService,
     this.onCommentTap,
     this.onStatusChanged,
+    this.onDeleted,
   });
 
   @override
   Widget build(BuildContext context) {
     final user = status.user;
     final cs = Theme.of(context).colorScheme;
+    // 本人帖子才出右上角「更多」菜单（删除动态）：登录 uid 与作者 id
+    // 对上才算本人；未登录/他人帖子一律不出现入口。
+    final session = context.watch<SessionService>();
+    final myUid = session.isLoggedIn ? session.uid : '';
+    final mine =
+        myUid.isNotEmpty && user != null && '${user.id}' == myUid;
     final card = Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Column(
@@ -226,6 +239,26 @@ class StatusCard extends StatelessWidget {
                   ],
                 ),
               ),
+              if (mine)
+                PopupMenuButton<String>(
+                  icon: Icon(
+                    Icons.more_vert,
+                    size: 20,
+                    color: cs.onSurfaceVariant,
+                  ),
+                  tooltip: '更多',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                  onSelected: (v) {
+                    if (v == 'delete') _confirmDelete(context);
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'delete', child: Text('删除动态')),
+                  ],
+                ),
             ],
           ),
           const SizedBox(height: 8),
@@ -307,6 +340,46 @@ class StatusCard extends StatelessWidget {
         child: card,
       ),
     );
+  }
+
+  /// 删除本人帖子：先确认，成功后走 [onDeleted] 回调（详情页关页），
+  /// 无回调（列表卡）则弹提示、卡片随列表下次刷新消失；
+  /// 失败弹服务端消息，什么都不动。
+  Future<void> _confirmDelete(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除动态'),
+        content: const Text('删除这条动态？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await context.read<WeiyueService>().deleteStatus(status.id);
+    } catch (e) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('$e')));
+      return;
+    }
+    if (onDeleted != null) {
+      onDeleted!(status);
+    } else if (context.mounted) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('动态已删除')));
+    }
   }
 }
 

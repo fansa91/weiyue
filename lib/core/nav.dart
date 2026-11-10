@@ -14,10 +14,19 @@ void openProfile(BuildContext context, int uid) {
 }
 
 /// 打开详情：视频帖也在详情页内嵌预览播放，不再有独立播放页。
-void openDetail(BuildContext context, WbStatus status) {
-  Navigator.of(context).push(MaterialPageRoute(
-    builder: (_) => DetailScaffold(child: DetailScreen(status: status)),
-  ));
+/// 详情页内删帖成功会以被删帖子 id 作为路由返回值关闭，
+/// 这里统一给来源列表侧一条「动态已删除」提示。
+Future<void> openDetail(BuildContext context, WbStatus status) async {
+  final result = await Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => DetailScaffold(child: DetailScreen(status: status)),
+    ),
+  );
+  if (result is String && result.isNotEmpty && context.mounted) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('动态已删除')));
+  }
 }
 
 /// 打开话题页。[token] 可以是正文里的原始分段（含两端 #）或裸话题名。

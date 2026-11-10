@@ -306,6 +306,27 @@ void main() {
       expect(adapter.requests.single.uri.path, '/ajax/friendships/destory');
       expect(_formOf(adapter.bodies.single), {'uid': '42'});
     });
+
+    test('删评论 statuses/destroyComment 只发 cid（主包实证）', () async {
+      final (adapter, svc) = await rig();
+      await svc.deleteComment('c9');
+      expect(
+        adapter.requests.single.uri.path,
+        '/ajax/statuses/destroyComment',
+      );
+      expect(_formOf(adapter.bodies.single), {'cid': 'c9'});
+    });
+
+    test('删帖子 statuses/destroy 只发 id（主包实证）', () async {
+      final (adapter, svc) = await rig();
+      await svc.deleteStatus('1001');
+      expect(adapter.requests.single.uri.path, '/ajax/statuses/destroy');
+      expect(_formOf(adapter.bodies.single), {'id': '1001'});
+      expect(
+        _headerOf(adapter.requests.single, 'referer'),
+        'https://weibo.com/detail/1001',
+      );
+    });
   });
 
   group('服务端报错解析与诊断记录', () {
@@ -334,6 +355,32 @@ void main() {
         '/ajax/statuses/setLike',
       );
       expect(session.recentLoginFailures.first.message, 'FAKE 不能重复点赞');
+    });
+
+    test('删评论 ok=0 带 msg：抛该 msg 并记入诊断', () async {
+      final session = await _session();
+      final adapter = _CaptureAdapter(
+        (opt) async => jsonBody({'ok': 0, 'msg': 'FAKE 评论不存在或已删除'}),
+      );
+      final svc = WeiyueService(
+        _Visitor(),
+        pcDio: _dio(adapter),
+        session: session,
+      );
+      await expectLater(
+        svc.deleteComment('c9'),
+        throwsA(
+          isA<WeiyueException>().having(
+            (e) => e.message,
+            'message',
+            'FAKE 评论不存在或已删除',
+          ),
+        ),
+      );
+      expect(
+        session.recentLoginFailures.first.endpoint,
+        '/ajax/statuses/destroyComment',
+      );
     });
 
     test('error 字段形态：抛 error 文案', () async {

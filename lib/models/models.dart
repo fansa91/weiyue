@@ -724,6 +724,20 @@ class WbComment {
           .toList(),
     );
   }
+
+  /// 局部更新（删楼中楼回复时换 replies 用，其余字段原样带过）。
+  WbComment copyWith({List<WbComment>? replies}) {
+    return WbComment(
+      id: id,
+      user: user,
+      text: text,
+      createdAtRaw: createdAtRaw,
+      source: source,
+      likeCount: likeCount,
+      floorNumber: floorNumber,
+      replies: replies ?? this.replies,
+    );
+  }
 }
 
 /// 点赞条目（m attitudes/show）

@@ -2101,4 +2101,26 @@ class WeiyueService {
       referer: 'https://weibo.com/u/$uid',
     );
   }
+
+  /// 删自己的评论：POST /ajax/statuses/destroyComment（文档清单原文）。
+  /// 参数 2026-11-10 主包调用点实证：{cid: 评论id}（主包同发的一个
+  /// filter 是评论列表的筛选视图状态，与删除语义无关，不发）。
+  Future<void> deleteComment(String cid) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/destroyComment',
+      form: {'cid': cid},
+    );
+  }
+
+  /// 删自己的帖子：POST /ajax/statuses/destroy（文档清单原文）。
+  /// 参数 {id}（主包 destroyWB 调用点实证：{id: idstr/ori_mid}）。
+  Future<void> deleteStatus(String id) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/destroy',
+      form: {'id': id},
+      referer: _detailReferer(id),
+    );
+  }
 }
