@@ -1943,14 +1943,14 @@ class WeiyueService {
     );
   }
 
-  /// 收藏（创建）：POST /ajax/favorites/create，参数 id。
-  /// ⚠️ **推测实现**：文档 favorites 族只列了 all_fav|show|tags，
-  /// 创建路径不在清单内；按族名+老 API 惯例推测为 favorites/create。
-  /// 调用收敛在此单点，路径若不对只改这一处。
+  /// 收藏（创建）：POST /ajax/statuses/createFavorites，参数 id。
+  /// 2026-11-10 主包调用点实证（setFavorited）：创建/取消同族，
+  /// 按 newFavorited 在 createFavorites/destoryFavorites 间切换、同发 {id}。
+  /// 此前推测的 /ajax/favorites/create 不存在（真机回非 JSON HTTP 200）。
   Future<void> createFavorite(String id) async {
     await _post(
       WbStack.pc,
-      '$_pcBase/ajax/favorites/create',
+      '$_pcBase/ajax/statuses/createFavorites',
       form: {'id': id},
       referer: _detailReferer(id),
     );
@@ -1968,23 +1968,25 @@ class WeiyueService {
   }
 
   /// 关注：POST /ajax/friendships/create（文档清单原文）。
-  /// 参数名清单未给：卡片关注按钮抓包参数为 uid、网页端惯例为
-  /// friend_id，两者同发（服务端忽略多余参数），收敛此单点便于修正。
+  /// 参数 2026-11-10 主包调用点实证：只发 {friend_uid: 对方uid字符串}
+  /// （page/followcardid/mark 为可选附加项，不发）。此前同发
+  /// friend_id+uid 真机回非 JSON HTTP 400。
   Future<void> followUser(String uid) async {
     await _post(
       WbStack.pc,
       '$_pcBase/ajax/friendships/create',
-      form: {'friend_id': uid, 'uid': uid},
+      form: {'friend_uid': uid},
       referer: 'https://weibo.com/u/$uid',
     );
   }
 
-  /// 取关：POST /ajax/friendships/destory（文档原文拼写），参数同关注。
+  /// 取关：POST /ajax/friendships/destory（文档原文拼写）。
+  /// 参数 2026-11-10 主包调用点实证：只发 {uid: 对方uid字符串}。
   Future<void> unfollowUser(String uid) async {
     await _post(
       WbStack.pc,
       '$_pcBase/ajax/friendships/destory',
-      form: {'friend_id': uid, 'uid': uid},
+      form: {'uid': uid},
       referer: 'https://weibo.com/u/$uid',
     );
   }

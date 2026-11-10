@@ -269,10 +269,13 @@ void main() {
       expect(_formOf(adapter.bodies.last), {'id': '1001', 'comment': ''});
     });
 
-    test('收藏 favorites/create（推测路径，收敛单点）', () async {
+    test('收藏 statuses/createFavorites（主包实证，与取消同族）', () async {
       final (adapter, svc) = await rig();
       await svc.createFavorite('1001');
-      expect(adapter.requests.single.uri.path, '/ajax/favorites/create');
+      expect(
+        adapter.requests.single.uri.path,
+        '/ajax/statuses/createFavorites',
+      );
       expect(_formOf(adapter.bodies.single), {'id': '1001'});
     });
 
@@ -286,22 +289,22 @@ void main() {
       expect(_formOf(adapter.bodies.single), {'id': '1001'});
     });
 
-    test('关注 friendships/create 同发 friend_id 与 uid', () async {
+    test('关注 friendships/create 只发 friend_uid（主包实证）', () async {
       final (adapter, svc) = await rig();
       await svc.followUser('42');
       expect(adapter.requests.single.uri.path, '/ajax/friendships/create');
-      expect(_formOf(adapter.bodies.single), {'friend_id': '42', 'uid': '42'});
+      expect(_formOf(adapter.bodies.single), {'friend_uid': '42'});
       expect(
         _headerOf(adapter.requests.single, 'referer'),
         'https://weibo.com/u/42',
       );
     });
 
-    test('取关 friendships/destory（文档原文拼写）', () async {
+    test('取关 friendships/destory 只发 uid（文档原文拼写+主包实证）', () async {
       final (adapter, svc) = await rig();
       await svc.unfollowUser('42');
       expect(adapter.requests.single.uri.path, '/ajax/friendships/destory');
-      expect(_formOf(adapter.bodies.single), {'friend_id': '42', 'uid': '42'});
+      expect(_formOf(adapter.bodies.single), {'uid': '42'});
     });
   });
 
