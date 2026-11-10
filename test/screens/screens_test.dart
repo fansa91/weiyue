@@ -251,8 +251,9 @@ void main() {
         weibo: _RelatedFakeService(),
       ));
       await _settle(tester);
-      // 视频区域较高，页签栏在首屏下方，先滚动外层列表使其构建出来
-      await tester.drag(find.byType(ListView).first, const Offset(0, -350));
+      // 视频区域较高，页签栏在首屏下方（且按 sliver 懒构建尚未进树，
+      // 页面上已无外层 ListView 可作锚点），先上滑收起详情区使其构建出来
+      await tester.drag(find.byType(NestedScrollView), const Offset(0, -350));
       await _settle(tester);
       // 页签栏有「相关视频」，且列表内容默认不在正文下方直接露出
       expect(find.text('相关视频'), findsOneWidget);
@@ -274,7 +275,7 @@ void main() {
         weibo: _NoRelatedFakeService(),
       ));
       await _settle(tester);
-      await tester.drag(find.byType(ListView).first, const Offset(0, -350));
+      await tester.drag(find.byType(NestedScrollView), const Offset(0, -350));
       await _settle(tester);
       await tester.tap(find.text('相关视频'));
       await _settle(tester);
