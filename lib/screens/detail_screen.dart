@@ -42,8 +42,13 @@ class DetailScreen extends StatefulWidget {
   State<DetailScreen> createState() => _DetailScreenState();
 }
 
-class _DetailScreenState extends State<DetailScreen> {
+class _DetailScreenState extends State<DetailScreen>
+    with SingleTickerProviderStateMixin {
   late WbStatus _status = widget.status;
+
+  /// 单栏布局的页签控制器（宽屏右栏仍走 _buildTabs 内的
+  /// DefaultTabController，两边互不影响）。
+  late final TabController _tabController;
   List<WbComment> _comments = const [];
   int _commentTotal = 0;
   int _commentMaxId = 0;
@@ -62,7 +67,14 @@ class _DetailScreenState extends State<DetailScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 4, vsync: this);
     _load();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -296,8 +308,28 @@ class _DetailScreenState extends State<DetailScreen> {
     ];
   }
 
-  /// 评论/点赞/转发/相关视频四页签。窄屏用固定高 520；宽屏右栏
-  /// [fillHeight] 时用 Expanded 撑满面板高度，各页签列表独立滚动。
+  /// 四页签标题（单栏吸顶栏与宽屏右栏共用，保证计数口径一致）。
+  List<Tab> _tabLabels() {
+    return [
+      Tab(text: '评论 ${_status.commentsCount}'),
+      Tab(text: '点赞 ${_status.attitudesCount}'),
+      Tab(text: '转发 ${_status.repostsCount}'),
+      const Tab(text: '相关视频'),
+    ];
+  }
+
+  /// 页签空态/加载态占位：一支只含 SliverFillRemaining 的可滚动视图。
+  /// 单栏 NestedScrollView 的 body 必须是可滚动体，手势才能在
+  /// 内外层之间接力（下拉回详情）；裸 Center 不是滚动体，手势会断链。
+  /// 宽屏右栏里它等同于铺满居中，视觉不变。
+  Widget _tabPlaceholder(Widget child) {
+    return CustomScrollView(
+      slivers: [SliverFillRemaining(hasScrollBody: false, child: child)],
+    );
+  }
+
+  /// 评论/点赞/转发/相关视频四页签。宽屏右栏专用：[fillHeight] 时用
+  /// Expanded 撑满面板高度，各页签列表独立滚动。
   Widget _buildTabs(ColorScheme cs, {bool fillHeight = false}) {
     final loggedIn = context.watch<SessionService>().isLoggedIn;
     final tabBarView = TabBarView(
@@ -316,12 +348,7 @@ class _DetailScreenState extends State<DetailScreen> {
             labelColor: cs.primary,
             isScrollable: true,
             tabAlignment: TabAlignment.start,
-            tabs: [
-              Tab(text: '评论 ${_status.commentsCount}'),
-              Tab(text: '点赞 ${_status.attitudesCount}'),
-              Tab(text: '转发 ${_status.repostsCount}'),
-              const Tab(text: '相关视频'),
-            ],
+            tabs: _tabLabels(),
           ),
           if (fillHeight)
             Expanded(child: tabBarView)
@@ -332,10 +359,78 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
+  /// 单栏（移动端）主体：单一滚动体系。
+  ///
+  /// 旧结构是外层 ListView 套固定高 520 的 TabBarView（内层列表
+  /// 独立滚动）：页签栏随正文滚走不吸顶，内层列表到顶后下拉也
+  /// 回不到详情区。现改为 NestedScrollView：表头 sliver 依次为
+  /// 帖子详情区 + pinned 页签栏，body 是四页签的 TabBarView，
+  /// 内外滚动由框架接力——上滑先收起详情区、页签栏钉在顶部后
+  /// 列表继续滚；内层列表到顶再下拉则重新展开详情区。
+  Widget _buildNarrowBody(ColorScheme cs) {
+    final loggedIn = context.watch<SessionService>().isLoggedIn;
+    return NestedScrollView(
+      headerSliverBuilder: (context, innerBoxIsScrolled) => [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+          sliver: SliverToBoxAdapter(
+            child: _buildStatusOnly(context).first,
+          ),
+        ),
+        SliverPersistentHeader(
+          pinned: true,
+          delegate: _TabBarHeaderDelegate(
+            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+            tabBar: TabBar(
+              controller: _tabController,
+              labelColor: cs.primary,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              tabs: _tabLabels(),
+            ),
+          ),
+        ),
+      ],
+      // 通知监听只裹 body：只有页签内层列表的滚动才触发分页续拉，
+      // 表头自身的收起/展开滚动不经过这里，不会误触发。
+      body: NotificationListener<ScrollNotification>(
+        onNotification: _onTabScroll,
+        child: TabBarView(
+          controller: _tabController,
+          children: [
+            _buildComments(cs, loggedIn: loggedIn),
+            _buildAttitudes(),
+            _buildRepostsTab(loggedIn),
+            _buildRelated(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 页签列表接近底部时按当前页签续拉一页（页大小与到底判据
+  /// 与原按钮触发完全一致，只是改由滚动位置驱动）。各加载方法
+  /// 内部都有防重入标记，滚动通知连发不会重复请求。
+  bool _onTabScroll(ScrollNotification n) {
+    if (n is ScrollUpdateNotification && n.metrics.extentAfter < 240) {
+      switch (_tabController.index) {
+        case 0:
+          if (_commentMaxId != 0 && _comments.length < _commentTotal) {
+            _loadMoreComments();
+          }
+        case 2:
+          if (_repostsRequested && _repostPage < _repostMaxPage) {
+            _loadMoreReposts();
+          }
+      }
+    }
+    return false;
+  }
+
   /// 相关视频页签：原帖子下方区块改入页签栏，独立滚动。
   Widget _buildRelated() {
     if (_related.isEmpty) {
-      return const Center(child: Text('暂无相关视频'));
+      return _tabPlaceholder(const Center(child: Text('暂无相关视频')));
     }
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -352,10 +447,12 @@ class _DetailScreenState extends State<DetailScreen> {
   /// 转发页签：未登录保持占位说明；登录后懒加载 repostTimeline 并分页。
   Widget _buildRepostsTab(bool loggedIn) {
     if (!loggedIn) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text('转发列表访客不可见\n（服务端要求登录后查看）', textAlign: TextAlign.center),
+      return _tabPlaceholder(
+        const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('转发列表访客不可见\n（服务端要求登录后查看）', textAlign: TextAlign.center),
+          ),
         ),
       );
     }
@@ -364,13 +461,13 @@ class _DetailScreenState extends State<DetailScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _loadReposts();
       });
-      return const Center(child: CircularProgressIndicator());
+      return _tabPlaceholder(const Center(child: CircularProgressIndicator()));
     }
     if (_repostsLoading && _reposts.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return _tabPlaceholder(const Center(child: CircularProgressIndicator()));
     }
     if (_reposts.isEmpty) {
-      return const Center(child: Text('暂无转发'));
+      return _tabPlaceholder(const Center(child: Text('暂无转发')));
     }
     return ListView(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -433,14 +530,9 @@ class _DetailScreenState extends State<DetailScreen> {
               ],
             );
           }
-          return ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-            children: [
-              ..._buildStatusOnly(context),
-              const SizedBox(height: 8),
-              _buildTabs(cs),
-            ],
-          );
+          // 单栏：NestedScrollView 单一滚动体系（详情区可收起、
+          // 页签栏吸顶、内层列表到顶下拉能回到详情区）。
+          return _buildNarrowBody(cs);
         },
       ),
     );
@@ -523,7 +615,7 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Widget _buildComments(ColorScheme cs, {required bool loggedIn}) {
     if (_commentsLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return _tabPlaceholder(const Center(child: CircularProgressIndicator()));
     }
     final sorted = _sortedComments();
     final hasMore = _commentMaxId != 0 && _comments.length < _commentTotal;
@@ -582,10 +674,10 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Widget _buildAttitudes() {
     if (_attitudesLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return _tabPlaceholder(const Center(child: CircularProgressIndicator()));
     }
     if (_attitudes.isEmpty) {
-      return const Center(child: Text('暂无点赞'));
+      return _tabPlaceholder(const Center(child: Text('暂无点赞')));
     }
     return ListView(
       children: [
@@ -598,6 +690,40 @@ class _DetailScreenState extends State<DetailScreen> {
             ),
       ],
     );
+  }
+}
+
+/// 单栏详情页的页签栏吸顶头：高度恒为页签栏自身高度，
+/// 页签内容继续上滑时它钉在顶部不动；带不透明背景，
+/// 避免下方内容滚动时透出。
+class _TabBarHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final TabBar tabBar;
+  final Color backgroundColor;
+
+  const _TabBarHeaderDelegate({
+    required this.tabBar,
+    required this.backgroundColor,
+  });
+
+  @override
+  double get minExtent => tabBar.preferredSize.height;
+
+  @override
+  double get maxExtent => tabBar.preferredSize.height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Material(color: backgroundColor, child: tabBar);
+  }
+
+  @override
+  bool shouldRebuild(covariant _TabBarHeaderDelegate oldDelegate) {
+    return oldDelegate.tabBar != tabBar ||
+        oldDelegate.backgroundColor != backgroundColor;
   }
 }
 
