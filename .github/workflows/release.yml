@@ -74,10 +74,19 @@ jobs:
           echo "BUILD_NUMBER=${{ github.run_number }}" >> "$GITHUB_ENV"
       - run: flutter build apk --release --split-per-abi --build-name=${{ env.BUILD_NAME }} --build-number=${{ env.BUILD_NUMBER }}
 
+      - name: Rename APKs (weiyue-<version>-<abi>.apk)
+        run: |
+          cd build/app/outputs/flutter-apk
+          for f in app-*-release.apk; do
+            abi="${f#app-}"; abi="${abi%-release.apk}"
+            mv "$f" "weiyue-${{ env.BUILD_NAME }}-$abi.apk"
+          done
+          ls -la
+
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: build/app/outputs/flutter-apk/app-*-release.apk
+          path: build/app/outputs/flutter-apk/weiyue-*.apk
 
   # ---------------- iOS ----------------
   ios:
@@ -116,6 +125,14 @@ jobs:
           cp -R "$APP_PATH" /tmp/ipapack/Payload/
           cd /tmp/ipapack && zip -qry "$OLDPWD/build/ios/ipa/weiyue-unsigned.ipa" Payload
           ls -la "$OLDPWD/build/ios/ipa/"
+
+      - name: Rename IPA (weiyue-<version>-ios-unsigned.ipa)
+        run: |
+          cd build/ios/ipa
+          for f in *.ipa; do
+            [ "$f" = "weiyue-${{ env.BUILD_NAME }}-ios-unsigned.ipa" ] || mv "$f" "weiyue-${{ env.BUILD_NAME }}-ios-unsigned.ipa"
+          done
+          ls -la
 
       - uses: actions/upload-artifact@v4
         with:
