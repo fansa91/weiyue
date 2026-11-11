@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../core/quality.dart';
 import '../models/models.dart';
 import 'download_button.dart';
+import 'live_photo_view.dart';
 import 'network_image.dart';
 import 'viewer_nav.dart';
 
@@ -13,17 +14,27 @@ import 'viewer_nav.dart';
 /// ExtendedImageGesturePageView + 手势模式 ExtendedImage 替代；
 /// 原 PhotoView 的 heroAttributes 无对应 Hero 端承接（列表侧未包 Hero），
 /// 迁移时直接去掉，不影响现有行为。
+/// 非长图支持下滑退出：ExtendedImageSlidePage（纵向）承接滑出，
+/// 图片开 enableSlideOutPage；未缩放时竖拖图片随手移动、黑底随偏移
+/// 渐隐，过阈值（库默认：屏高/6）松手 pop，不过阈值回弹复位；
+/// 已放大时竖拖先平移图片、到边界才接力滑出（库的手势协调）。
+/// 实况照片页走 LivePhotoView（长按播放动态部分）。
 class PhotoGalleryScreen extends StatefulWidget {
   final List<WbPic> pics;
   final int initialIndex;
 
   /// 查看用图档位：默认标准（图库大图，省流量档降为中图）。
   final ImageQualityPref imageQuality;
+
+  /// 实况照片播放后端工厂（测试缝）；null 时用 media_kit 真实后端。
+  final LivePlaybackFactory? livePlaybackFactory;
+
   const PhotoGalleryScreen({
     super.key,
     required this.pics,
     this.initialIndex = 0,
     this.imageQuality = ImageQualityPref.standard,
+    this.livePlaybackFactory,
   });
 
   @override
@@ -32,8 +43,9 @@ class PhotoGalleryScreen extends StatefulWidget {
 
 class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
   late int _index = widget.initialIndex;
-  late final _controller =
-      ExtendedPageController(initialPage: widget.initialIndex);
+  late final _controller = ExtendedPageController(
+    initialPage: widget.initialIndex,
+  );
 
   @override
   void dispose() {
@@ -71,65 +83,118 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
           ),
         ],
       ),
-      body: ViewerKeyboardShortcuts(
-        canPrev: _index > 0,
-        canNext: _index < widget.pics.length - 1,
-        onPrev: () => _goTo(_index - 1),
-        onNext: () => _goTo(_index + 1),
-        child: Stack(
-          children: [
-            ExtendedImageGesturePageView.builder(
-              controller: _controller,
-              itemCount: widget.pics.length,
-              onPageChanged: (i) => setState(() => _index = i),
-              itemBuilder: (context, i) {
-                final pic = widget.pics[i];
-                return GestureImage(
-                  url: pic.galleryUrl(widget.imageQuality),
-                  inPageView: true,
-                );
-              },
+      body: ExtendedImageSlidePage(
+        // 只纵向滑出：横向让给翻页手势。
+        slideAxis: SlideAxis.vertical,
+        slidePageBackgroundHandler: (offset, pageSize) =>
+            defaultSlidePageBackgroundHandler(
+              offset: offset,
+              pageSize: pageSize,
+              color: Colors.black,
+              pageGestureAxis: SlideAxis.vertical,
             ),
-            // 桌面/宽屏：查看区两侧上一张/下一张按钮（移动端靠手势，不显示）
-            if (showSideButtons)
-              Positioned.fill(
-                child: ViewerSideButtons(
-                  index: _index,
-                  count: widget.pics.length,
-                  onGoTo: _goTo,
-                ),
+        child: ViewerKeyboardShortcuts(
+          canPrev: _index > 0,
+          canNext: _index < widget.pics.length - 1,
+          onPrev: () => _goTo(_index - 1),
+          onNext: () => _goTo(_index + 1),
+          child: Stack(
+            children: [
+              ExtendedImageGesturePageView.builder(
+                controller: _controller,
+                itemCount: widget.pics.length,
+                onPageChanged: (i) => setState(() => _index = i),
+                itemBuilder: (context, i) {
+                  final pic = widget.pics[i];
+                  if (pic.isLivePhoto) {
+                    return LivePhotoView(
+                      pic: pic,
+                      imageUrl: pic.galleryUrl(widget.imageQuality),
+                      active: i == _index,
+                      playbackFactory: widget.livePlaybackFactory,
+                    );
+                  }
+                  return GestureImage(
+                    url: pic.galleryUrl(widget.imageQuality),
+                    inPageView: true,
+                    enableSlideOutPage: true,
+                  );
+                },
               ),
-          // 多图时底部黑底页码（AppBar 透明底在亮图上看不清时仍可读），
-          // 不拦截手势。
-          if (multi)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 16,
-              child: IgnorePointer(
-                child: Center(
+              // 当前页是实况照片：左上角克制的 LIVE 标识
+              //（长按图片播放动态部分，见 LivePhotoView）。
+              if (widget.pics[_index].isLivePhoto)
+                Positioned(
+                  left: 12,
+                  top: 12,
                   child: Container(
-                    key: const ValueKey('gallery-page-indicator'),
+                    key: const ValueKey('gallery-live-badge'),
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 4,
+                      horizontal: 8,
+                      vertical: 3,
                     ),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.62),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(4),
                     ),
-                    child: Text(
-                      '${_index + 1} / ${widget.pics.length}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.motion_photos_on,
+                          color: Colors.white,
+                          size: 13,
+                        ),
+                        SizedBox(width: 4),
+                        Text(
+                          'LIVE',
+                          style: TextStyle(color: Colors.white, fontSize: 11.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              // 桌面/宽屏：查看区两侧上一张/下一张按钮（移动端靠手势，不显示）
+              if (showSideButtons)
+                Positioned.fill(
+                  child: ViewerSideButtons(
+                    index: _index,
+                    count: widget.pics.length,
+                    onGoTo: _goTo,
+                  ),
+                ),
+              // 多图时底部黑底页码（AppBar 透明底在亮图上看不清时仍可读），
+              // 不拦截手势。
+              if (multi)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 16,
+                  child: IgnorePointer(
+                    child: Center(
+                      child: Container(
+                        key: const ValueKey('gallery-page-indicator'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.62),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '${_index + 1} / ${widget.pics.length}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

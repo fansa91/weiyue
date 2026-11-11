@@ -203,6 +203,54 @@ class WbUser {
   }
 }
 
+/// .mov 直链是否像样：真实 fid 文件名主干有 30+ 字符；接口偶发残缺
+/// 空壳（解码出 https://us.sinaimg.cn/.mov，主干为空）必须判无效。
+bool _isPlausibleMovUrl(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null || uri.host.isEmpty || uri.pathSegments.isEmpty) {
+    return false;
+  }
+  final seg = uri.pathSegments.last;
+  if (!seg.toLowerCase().endsWith('.mov')) return false;
+  return seg.length - 4 >= 8;
+}
+
+/// 从 media/play 包装地址的 livephoto= 参数解码出 .mov 直链；
+/// 无此参数或解出的不是像样的 .mov 时返回空串。
+String _livePhotoDirectUrl(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null) return '';
+  final inner = uri.queryParameters['livephoto'];
+  if (inner == null || inner.isEmpty) return '';
+  return _isPlausibleMovUrl(inner) ? httpsUrl(inner) : '';
+}
+
+/// 实况地址是否有效：包装地址看其 livephoto= 直链，直链看自身。
+bool _isValidLiveVideoUrl(String url) {
+  final direct = _livePhotoDirectUrl(url);
+  return _isPlausibleMovUrl(direct.isNotEmpty ? direct : url);
+}
+
+/// 在候选地址（按优先级排列）里挑第一个有效的作主播放地址，
+/// 并解出兜底直链（优先从主地址解，主地址无参数时再看其余候选）。
+/// 全无效时主/兜底都为空串（该图按普通照片处理）。
+({String primary, String fallback}) _pickLiveVideo(List<String> candidates) {
+  final cleaned = [for (final c in candidates) httpsUrl(c.trim())];
+  for (final url in cleaned) {
+    if (url.isEmpty || !_isValidLiveVideoUrl(url)) continue;
+    var fallback = _livePhotoDirectUrl(url);
+    if (fallback.isEmpty) {
+      for (final other in cleaned) {
+        if (other.isEmpty || other == url) continue;
+        fallback = _livePhotoDirectUrl(other);
+        if (fallback.isNotEmpty) break;
+      }
+    }
+    return (primary: url, fallback: fallback);
+  }
+  return (primary: '', fallback: '');
+}
+
 class WbPic {
   final String pid;
   final String thumbnail;
@@ -215,6 +263,15 @@ class WbPic {
   final int width;
   final int height;
 
+  /// 实况照片（Live Photo）动态部分的主播放地址：media/play 包装地址
+  /// （PC pic_infos 的 video_hd 优先、video 兜底，见 [_pickLiveVideo]；
+  /// m pics 的 videoSrc）。普通照片为空串。
+  final String liveVideoUrl;
+
+  /// 实况照片动态部分的兜底直链：从主地址的 livephoto= 参数解码出的
+  /// .mov 直链，主地址播放失败时切换。无可解码参数时为空串。
+  final String liveVideoFallbackUrl;
+
   const WbPic({
     required this.pid,
     this.thumbnail = '',
@@ -223,7 +280,12 @@ class WbPic {
     this.original = '',
     this.width = 0,
     this.height = 0,
+    this.liveVideoUrl = '',
+    this.liveVideoFallbackUrl = '',
   });
+
+  /// 是否实况照片：以解析到有效动态地址为准（残缺地址不算）。
+  bool get isLivePhoto => liveVideoUrl.isNotEmpty;
 
   String get bestLarge =>
       large.isNotEmpty ? large : (original.isNotEmpty ? original : bmiddle);
@@ -517,6 +579,18 @@ class WbStatus {
         h = _intOf(sizeObj['height']);
         if (w > 0 && h > 0) break;
       }
+      // 实况照片（type=='livephoto'）另带 video / video_hd 两个
+      // media/play 包装地址（带时效签名，实测样本 pc_hottimeline_p2）：
+      // hd 优先，但 hd 偶见残缺空壳，_pickLiveVideo 按有效性回落。
+      var liveUrl = '', liveFallback = '';
+      if (_strOf(info['type']) == 'livephoto') {
+        final picked = _pickLiveVideo([
+          _strOf(info['video_hd']),
+          _strOf(info['video']),
+        ]);
+        liveUrl = picked.primary;
+        liveFallback = picked.fallback;
+      }
       return WbPic(
         pid: pid,
         thumbnail: u('thumbnail'),
@@ -525,6 +599,8 @@ class WbStatus {
         original: u('original'),
         width: w,
         height: h,
+        liveVideoUrl: liveUrl,
+        liveVideoFallbackUrl: liveFallback,
       );
     }
 
@@ -563,10 +639,19 @@ class WbStatus {
         // m 端混合帖的 pics 里混有 type=='video' 的条目（带 videoSrc，
         // 是视频封面/帧）：按 type 标记直接剔除，不再单靠 pic_ids 名单
         //（名单完整性在不同容器下并不一致）。
-        if (_strOf(pm['type']) == 'video' || pm.containsKey('videoSrc')) {
-          continue;
-        }
+        // 例外：type=='livephoto' 的条目同样带 videoSrc，但那是实况
+        // 照片的动态部分（实测样本 raw/m_hot_local.json），按图片保留
+        // 并把 videoSrc 接成实况播放地址。
+        final pmType = _strOf(pm['type']);
+        if (pmType == 'video') continue;
+        if (pmType != 'livephoto' && pm.containsKey('videoSrc')) continue;
         if (!keepPic(_strOf(pm['pid']))) continue;
+        var liveUrl = '', liveFallback = '';
+        if (pmType == 'livephoto') {
+          final picked = _pickLiveVideo([_strOf(pm['videoSrc'])]);
+          liveUrl = picked.primary;
+          liveFallback = picked.fallback;
+        }
         // m 端尺寸：large:{url,width,height} 或 geo:{width,height}
         final largeObj = _mapOf(pm['large']);
         final geo = _mapOf(pm['geo']);
@@ -578,6 +663,8 @@ class WbStatus {
             large: httpsUrl(_strOf(largeObj['url'])),
             width: _intOf(largeObj['width'] ?? geo['width']),
             height: _intOf(largeObj['height'] ?? geo['height']),
+            liveVideoUrl: liveUrl,
+            liveVideoFallbackUrl: liveFallback,
           ),
         );
       }
@@ -607,9 +694,7 @@ class WbStatus {
       video: video,
       isLongText: _boolOf(j['isLongText']),
       retweeted: rtMap.isEmpty ? null : WbStatus.fromJson(rtMap),
-      pageObjectId: _strOf(
-        pageInfo['object_id'] ?? mediaMap['object_id'],
-      ),
+      pageObjectId: _strOf(pageInfo['object_id'] ?? mediaMap['object_id']),
       isLive: _isLiveMap(pageInfo) || _isLiveMap(mediaMap),
       pagePic: () {
         final pp = _pagePicOf(pageInfo);
@@ -975,8 +1060,12 @@ Map<String, String> parseEmoticonMap(Map<String, dynamic> data) {
 
 /// 消息族列表的双游标分页结果：请求带 max_id + sinceId 两参
 /// （主包消息页组件实证），响应回传 next_cursor / nextId。
-typedef MessagePage<T> =
-    ({List<T> items, String maxId, String sinceId, bool hasMore});
+typedef MessagePage<T> = ({
+  List<T> items,
+  String maxId,
+  String sinceId,
+  bool hasMore,
+});
 
 /// 消息未读汇总。分类键名来自主包未读状态表（mention_status /
 /// all_mention_cmt / cmt / attitude，主包实证）；数值由
@@ -1014,8 +1103,7 @@ class MessageUnread {
   /// @我的页签徽标（微博 + 评论）
   int get mentions => mentionStatuses + mentionComments;
 
-  int get categoriesSum =>
-      mentions + commentsToMe + likesToMe + directMessages;
+  int get categoriesSum => mentions + commentsToMe + likesToMe + directMessages;
 
   /// 「我的」入口总徽标：服务端总数优先，否则分类求和
   int get total => serverTotal > 0 ? serverTotal : categoriesSum;

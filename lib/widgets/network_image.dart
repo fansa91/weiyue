@@ -58,11 +58,16 @@ class GestureImage extends StatelessWidget {
   /// 否则缩放后的拖动无法与翻页手势协调。
   final bool inPageView;
 
+  /// 是否启用下滑滑出页面（图库专用）：需祖先有 ExtendedImageSlidePage
+  /// 承接（图库页已包）。长图查看器等其他场景保持 false。
+  final bool enableSlideOutPage;
+
   const GestureImage({
     super.key,
     required this.url,
     this.onDoubleTap,
     this.inPageView = false,
+    this.enableSlideOutPage = false,
   });
 
   @override
@@ -71,6 +76,7 @@ class GestureImage extends StatelessWidget {
       url,
       cache: true,
       mode: ExtendedImageMode.gesture,
+      enableSlideOutPage: enableSlideOutPage,
       initGestureConfigHandler: (_) => GestureConfig(
         minScale: 0.8,
         maxScale: 3.0,

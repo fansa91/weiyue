@@ -169,8 +169,7 @@ class StatusCard extends StatelessWidget {
     // 对上才算本人；未登录/他人帖子一律不出现入口。
     final session = context.watch<SessionService>();
     final myUid = session.isLoggedIn ? session.uid : '';
-    final mine =
-        myUid.isNotEmpty && user != null && '${user.id}' == myUid;
+    final mine = myUid.isNotEmpty && user != null && '${user.id}' == myUid;
     final card = Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Column(
@@ -421,6 +420,31 @@ class _RetweetedBlock extends StatelessWidget {
   }
 }
 
+/// 实况照片角标：黑底圆角小片 + 图标 + LIVE 字样（与「长图」角标同款式）。
+class _LiveBadge extends StatelessWidget {
+  const _LiveBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('pic-live-badge'),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.motion_photos_on, color: Colors.white, size: 12),
+          SizedBox(width: 3),
+          Text('LIVE', style: TextStyle(color: Colors.white, fontSize: 11.5)),
+        ],
+      ),
+    );
+  }
+}
+
 class _PicGrid extends StatelessWidget {
   final WbStatus status;
   const _PicGrid({required this.status});
@@ -492,6 +516,9 @@ class _PicGrid extends StatelessWidget {
                     ),
                   ),
                 ),
+              // 实况照片：右上角 LIVE 角标（与长图角标错开位置）
+              if (pic.isLivePhoto)
+                const Positioned(right: 8, top: 8, child: _LiveBadge()),
             ],
           ),
         ),
@@ -512,11 +539,18 @@ class _PicGrid extends StatelessWidget {
           onTap: () => _onTapPic(context, i, imageQuality),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(6),
-            child: NetImage(
-              url: pics[i].feedUrl(imageQuality),
-              fit: BoxFit.cover,
-              errorBuilder: (_) => _errBox(context),
-              placeholderBuilder: (_) => _errBox(context),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                NetImage(
+                  url: pics[i].feedUrl(imageQuality),
+                  fit: BoxFit.cover,
+                  errorBuilder: (_) => _errBox(context),
+                  placeholderBuilder: (_) => _errBox(context),
+                ),
+                if (pics[i].isLivePhoto)
+                  const Positioned(right: 6, top: 6, child: _LiveBadge()),
+              ],
             ),
           ),
         );
