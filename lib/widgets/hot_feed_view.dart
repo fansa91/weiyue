@@ -7,7 +7,8 @@ import '../services/weiyue_service.dart';
 import 'responsive_status_list.dart';
 
 /// 热门分类 feed：hottimeline + max_id/fresh_idx 游标分页。
-/// 换分类时父级换 Key 重建。
+/// 父级（首页/视频页）用 IndexedStack 按分类保活本视图：切换分类
+/// 不销毁本 State，列表/分页/滚动位置都留着，只有下拉刷新才重拉。
 class HotFeedView extends StatefulWidget {
   final WbChannel channel;
   final bool Function(WbStatus status)? filter;

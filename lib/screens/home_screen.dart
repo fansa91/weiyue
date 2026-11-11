@@ -29,6 +29,13 @@ class _HomeScreenState extends State<HomeScreen> {
   WbChannel? _selected;
   bool _loadingChannels = true;
 
+  /// 已访问过的频道 key：访问过的频道视图在 IndexedStack 里保活
+  /// （列表内容、分页游标、滚动位置都保留），切回来不重新请求；
+  /// 未访问的频道先占位，首次点开才创建并加载一次。
+  final Set<String> _visited = {};
+
+  static String _keyOf(WbChannel ch) => '${ch.gid}_${ch.containerid}';
+
   @override
   void initState() {
     super.initState();
@@ -38,13 +45,26 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadChannels() async {
     final result = await context.read<WeiyueService>().getChannels();
     if (!mounted) return;
+    final initial = result.mine.isNotEmpty
+        ? result.mine.first
+        : WeiyueService.fallbackChannels.first;
     setState(() {
       _channels = result.mine;
-      _selected = result.mine.isNotEmpty
-          ? result.mine.first
-          : WeiyueService.fallbackChannels.first;
+      _selected = initial;
+      _visited.add(_keyOf(initial));
       _loadingChannels = false;
     });
+  }
+
+  Widget _feedFor(WbChannel ch) {
+    if (ch.gid == friendsChannel.gid) {
+      return const FriendsFeedView(key: ValueKey('friends_feed'));
+    }
+    return HotFeedView(
+      key: ValueKey(_keyOf(ch)),
+      channel: ch,
+      homeTopSignalEnabled: true,
+    );
   }
 
   /// 当前选中频道：选中项已不在列表里（如退出登录后「关注」消失）
@@ -66,6 +86,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final loggedIn = context.watch<SessionService>().isLoggedIn;
     final channels = [if (loggedIn) friendsChannel, ..._channels];
     final selected = channels.isEmpty ? null : _effectiveSelected(channels);
+    final selectedIndex = selected == null
+        ? -1
+        : channels.indexWhere((c) => _keyOf(c) == _keyOf(selected));
+    // 当前显示的频道必须在保活集合里（回落选中等无点击路径也覆盖）。
+    if (selected != null) _visited.add(_keyOf(selected));
     return Scaffold(
       appBar: AppBar(title: const Text('微阅 · 热门'), centerTitle: false),
       body: Column(
@@ -98,7 +123,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: ChoiceChip(
                           label: Text(ch.title),
                           selected: isSelected,
-                          onSelected: (_) => setState(() => _selected = ch),
+                          onSelected: (_) {
+                            _visited.add(_keyOf(ch));
+                            setState(() => _selected = ch);
+                          },
                           selectedColor: cs.primaryContainer,
                           showCheckmark: false,
                         ),
@@ -110,12 +138,16 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(
             child: selected == null
                 ? const SizedBox.shrink()
-                : selected.gid == friendsChannel.gid
-                ? const FriendsFeedView(key: ValueKey('friends_feed'))
-                : HotFeedView(
-                    key: ValueKey('${selected.gid}_${selected.containerid}'),
-                    channel: selected,
-                    homeTopSignalEnabled: true,
+                : IndexedStack(
+                    index: selectedIndex,
+                    children: [
+                      for (var i = 0; i < channels.length; i++)
+                        if (i == selectedIndex ||
+                            _visited.contains(_keyOf(channels[i])))
+                          _feedFor(channels[i])
+                        else
+                          const SizedBox.shrink(),
+                    ],
                   ),
           ),
         ],

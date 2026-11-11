@@ -47,6 +47,11 @@ class _VideoTabScreenState extends State<VideoTabScreen> {
   String _selectedName = '推荐';
   final Map<String, WbChannel> _resolved = {};
 
+  /// 已访问过的分类名：访问过的分类视图在 IndexedStack 里保活
+  /// （列表、分页、滚动位置都保留），切回来不重新请求；
+  /// 未访问的先占位，首次点开才创建并加载一次。
+  final Set<String> _visited = {'推荐'};
+
   @override
   void initState() {
     super.initState();
@@ -68,7 +73,7 @@ class _VideoTabScreenState extends State<VideoTabScreen> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final channel = _channelFor(_selectedName);
+    final names = _tabs.keys.toList();
     return Scaffold(
       appBar: AppBar(title: const Text('视频'), centerTitle: false),
       body: Column(
@@ -79,13 +84,16 @@ class _VideoTabScreenState extends State<VideoTabScreen> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               children: [
-                for (final name in _tabs.keys)
+                for (final name in names)
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ChoiceChip(
                       label: Text(name),
                       selected: _selectedName == name,
-                      onSelected: (_) => setState(() => _selectedName = name),
+                      onSelected: (_) {
+                        _visited.add(name);
+                        setState(() => _selectedName = name);
+                      },
                       selectedColor: cs.primaryContainer,
                       showCheckmark: false,
                     ),
@@ -95,11 +103,21 @@ class _VideoTabScreenState extends State<VideoTabScreen> {
           ),
           const Divider(height: 1),
           Expanded(
-            child: HotFeedView(
-              key: ValueKey('video_${channel.gid}'),
-              channel: channel,
-              filter: (s) => s.hasVideo || (s.retweeted?.hasVideo ?? false),
-              emptyText: '该分类暂未刷到视频，下拉刷新试试',
+            child: IndexedStack(
+              index: names.indexOf(_selectedName),
+              children: [
+                for (final name in names)
+                  if (name == _selectedName || _visited.contains(name))
+                    HotFeedView(
+                      key: ValueKey('video_$name'),
+                      channel: _channelFor(name),
+                      filter: (s) =>
+                          s.hasVideo || (s.retweeted?.hasVideo ?? false),
+                      emptyText: '该分类暂未刷到视频，下拉刷新试试',
+                    )
+                  else
+                    const SizedBox.shrink(),
+              ],
             ),
           ),
         ],
