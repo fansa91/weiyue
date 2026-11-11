@@ -23,6 +23,9 @@ import '../helpers/fakes.dart';
 /// 缺参回 HTTP 200 网页 HTML）：分组经 allGroups 关注分组段取
 /// （message_all_groups.json 按样本 pc_allGroups 结构构造）。
 /// 非 JSON 报错带正文指纹（bodyFingerprint）也在本文件覆盖。
+/// msgList/summary 自 2026-11-11 修复起靠 PC 栈统一携带
+/// Accept: application/json 才回 JSON（缺之回 HTTP 200 的 HTML
+/// 404 页，线上对照实证），本文件有按此行为建模的回归用例。
 class CountingVisitor extends VisitorService {
   static const _id = VisitorIdentity('VSUB', 'VSUBP', 1793000000000);
 
@@ -350,6 +353,63 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('msgList：请求带 Accept: application/json（缺之服务端回 HTML 404 页）', () async {
+    // 按 2026-11-11 线上对照实证建模：msgList/summary 按 Accept 做
+    // 内容协商——不带 application/json 时回 HTTP 200 的通用 HTML
+    // 404 页（<title>404错误</title>），带了才回 JSON。适配器据此
+    // 分流：服务层若丢了 Accept 头，本用例会以指纹异常直接失败。
+    String? acceptOf(RequestOptions opt) {
+      for (final e in opt.headers.entries) {
+        if (e.key.toLowerCase() == 'accept') return '${e.value}';
+      }
+      return null;
+    }
+
+    final adapter = FakeAdapter((opt) async {
+      final accept = acceptOf(opt) ?? '';
+      if (!accept.contains('application/json')) {
+        return ResponseBody.fromString(
+          '<html><head><title>404错误</title></head>'
+          '<body>not found</body></html>',
+          200,
+          headers: {
+            Headers.contentTypeHeader: ['text/html; charset=utf-8'],
+          },
+        );
+      }
+      return jsonBody(_fixture('message_msglist.json'));
+    });
+    final svc = await _svc(adapter);
+
+    final page = await svc.getMessageFeed();
+    expect(page.items.length, 3);
+    final req = adapter.requests.single;
+    expect(req.uri.path, '/ajax/message/msgList');
+    expect(acceptOf(req), contains('application/json'));
+  });
+
+  test('未读汇总：summary 请求同样带 Accept: application/json', () async {
+    final adapter = FakeAdapter((opt) async {
+      if (opt.uri.path.endsWith('allGroups')) {
+        return jsonBody(_fixture('message_all_groups.json'));
+      }
+      if (opt.uri.path.endsWith('unreadHint')) {
+        return jsonBody(_fixture('message_unread_hint.json'));
+      }
+      return jsonBody(_fixture('message_summary.json'));
+    });
+    final svc = await _svc(adapter);
+
+    await svc.getMessageSummary();
+    final sumReq = adapter.requests.firstWhere(
+      (r) => r.uri.path.endsWith('/ajax/message/summary'),
+    );
+    final accept = sumReq.headers.entries
+        .firstWhere((e) => e.key.toLowerCase() == 'accept')
+        .value;
+    expect('$accept', contains('application/json'));
   });
 
   group('bodyFingerprint 正文指纹（纯函数）', () {

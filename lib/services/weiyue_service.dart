@@ -148,6 +148,18 @@ class WeiyueService {
   /// （值 = 会话里的 XSRF-TOKEN Cookie，网页端每个 ajax 请求都带）：
   /// 缺失时多个接口直接回 HTTP 400 非 JSON（真机实证：关注列表等）。
   /// 访客请求永不带、m 栈不带，保持既有行为不变。
+  ///
+  /// PC 栈还必须带 `Accept: application/json, text/plain, */*`
+  /// （网页端 axios 的默认值，dio 默认不发 Accept）：消息族的
+  /// /ajax/message/msgList 与 /ajax/message/summary 按 Accept 做
+  /// 内容协商，缺此头（或只有 */*）时服务端回 HTTP 200 的通用
+  /// HTML 404 页（<title>404错误</title>）而非 JSON——2026-11-10
+  /// 真机消息中心全页签报「非 JSON（网页标题 404）」即此故；
+  /// 2026-11-11 线上对照实证（访客 Cookie + Referer 不变，只变
+  /// Accept：带 → 回 JSON，不带 → 回 404 网页；同族 cmt /
+  /// attitudes / mentions 不协商、与此头无关）。现行主包
+  /// （weibo-pro-next）消息模块与 2026-10 捕获逐字一致，调用点
+  /// 未变，差异只在此头。
   Map<String, String> _requestHeaders(
     WbStack stack, {
     required String cookie,
@@ -162,6 +174,9 @@ class WeiyueService {
       'X-Requested-With': 'XMLHttpRequest',
       'Cookie': cookie,
     };
+    if (stack == WbStack.pc) {
+      headers['Accept'] = 'application/json, text/plain, */*';
+    }
     if (stack == WbStack.pc && useSession) {
       final xsrf = session.xsrfToken();
       if (xsrf != null && xsrf.isNotEmpty) {
