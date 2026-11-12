@@ -26,10 +26,10 @@ class HotFeedView extends StatefulWidget {
   });
 
   @override
-  State<HotFeedView> createState() => _HotFeedViewState();
+  State<HotFeedView> createState() => HotFeedViewState();
 }
 
-class _HotFeedViewState extends State<HotFeedView> {
+class HotFeedViewState extends State<HotFeedView> {
   final _scroll = ScrollController();
   final List<WbStatus> _items = [];
   bool _loading = false;
@@ -73,6 +73,10 @@ class _HotFeedViewState extends State<HotFeedView> {
       _loadMore();
     }
   }
+
+  /// 对外刷新句柄（桌面端刷新按钮经 GlobalKey 调用）：与下拉刷新
+  /// 同一条路径，从第一页重新拉取本频道，其余分类保活不受影响。
+  Future<void> refresh() => _loadFirst();
 
   Future<void> _loadFirst() async {
     setState(() {

@@ -84,7 +84,8 @@ class ViewerSideButtons extends StatelessWidget {
   }
 }
 
-/// 方向键快捷键包装：聚焦后左右方向键触发上一张/下一张。
+/// 方向键快捷键包装：聚焦后左右方向键触发上一张/下一张，
+/// 传了 [onClose] 时 Esc 触发关闭（查看器路由 pop）。
 ///
 /// 用 Focus 自带 autofocus 抢焦点（查看器是全屏路由，抢焦点无副作用）；
 /// 不可切换的方向（首张左键/末张右键）直接忽略不拦截。
@@ -95,6 +96,9 @@ class ViewerKeyboardShortcuts extends StatelessWidget {
   final VoidCallback onPrev;
   final VoidCallback onNext;
 
+  /// Esc 关闭回调；null 时 Esc 不拦截（保持旧行为）。
+  final VoidCallback? onClose;
+
   const ViewerKeyboardShortcuts({
     super.key,
     required this.child,
@@ -102,6 +106,7 @@ class ViewerKeyboardShortcuts extends StatelessWidget {
     required this.canNext,
     required this.onPrev,
     required this.onNext,
+    this.onClose,
   });
 
   @override
@@ -111,6 +116,11 @@ class ViewerKeyboardShortcuts extends StatelessWidget {
       onKeyEvent: (node, event) {
         if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
           return KeyEventResult.ignored;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.escape &&
+            onClose != null) {
+          onClose!();
+          return KeyEventResult.handled;
         }
         if (event.logicalKey == LogicalKeyboardKey.arrowLeft && canPrev) {
           onPrev();

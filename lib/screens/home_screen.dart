@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -34,7 +36,15 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 未访问的频道先占位，首次点开才创建并加载一次。
   final Set<String> _visited = {};
 
+  /// 各频道 feed 的刷新句柄（桌面端刷新按钮经 GlobalKey 调 State 的
+  /// refresh）：与频道一一对应，随保活的 IndexedStack 一起常驻。
+  final Map<String, GlobalKey<HotFeedViewState>> _feedKeys = {};
+  final GlobalKey<FriendsFeedViewState> _friendsFeedKey = GlobalKey();
+
   static String _keyOf(WbChannel ch) => '${ch.gid}_${ch.containerid}';
+
+  GlobalKey<HotFeedViewState> _feedKeyOf(WbChannel ch) =>
+      _feedKeys.putIfAbsent(_keyOf(ch), () => GlobalKey<HotFeedViewState>());
 
   @override
   void initState() {
@@ -58,13 +68,26 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _feedFor(WbChannel ch) {
     if (ch.gid == friendsChannel.gid) {
-      return const FriendsFeedView(key: ValueKey('friends_feed'));
+      return FriendsFeedView(key: _friendsFeedKey);
     }
     return HotFeedView(
-      key: ValueKey(_keyOf(ch)),
+      key: _feedKeyOf(ch),
       channel: ch,
       homeTopSignalEnabled: true,
     );
+  }
+
+  /// 桌面端刷新按钮：只重拉当前选中频道的 feed（与下拉刷新走同一条
+  /// _loadFirst 路径），其余频道的保活缓存不受影响。
+  void _refreshCurrent() {
+    final loggedIn = context.read<SessionService>().isLoggedIn;
+    final channels = [if (loggedIn) friendsChannel, ..._channels];
+    if (channels.isEmpty) return;
+    final selected = _effectiveSelected(channels);
+    final future = selected.gid == friendsChannel.gid
+        ? _friendsFeedKey.currentState?.refresh()
+        : _feedKeys[_keyOf(selected)]?.currentState?.refresh();
+    if (future != null) unawaited(future);
   }
 
   /// 当前选中频道：选中项已不在列表里（如退出登录后「关注」消失）
@@ -92,7 +115,21 @@ class _HomeScreenState extends State<HomeScreen> {
     // 当前显示的频道必须在保活集合里（回落选中等无点击路径也覆盖）。
     if (selected != null) _visited.add(_keyOf(selected));
     return Scaffold(
-      appBar: AppBar(title: const Text('微阅 · 热门'), centerTitle: false),
+      appBar: AppBar(
+        title: const Text('微阅 · 热门'),
+        centerTitle: false,
+        actions: [
+          // 桌面端没有下拉手势：宽屏（≥900，与应用既有宽屏断点一致）
+          // 显示刷新按钮，只刷当前频道；窄屏不显示，继续下拉刷新。
+          if (MediaQuery.sizeOf(context).width >= 900)
+            IconButton(
+              key: const ValueKey('home-refresh-button'),
+              icon: const Icon(Icons.refresh),
+              tooltip: '刷新',
+              onPressed: _refreshCurrent,
+            ),
+        ],
+      ),
       body: Column(
         children: [
           // 分类 chips

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -47,6 +49,20 @@ class _VideoTabScreenState extends State<VideoTabScreen> {
   String _selectedName = '推荐';
   final Map<String, WbChannel> _resolved = {};
 
+  /// 各分类 feed 的刷新句柄（桌面端刷新按钮经 GlobalKey 调 State 的
+  /// refresh）：与分类名一一对应，随保活的 IndexedStack 一起常驻。
+  final Map<String, GlobalKey<HotFeedViewState>> _feedKeys = {};
+
+  GlobalKey<HotFeedViewState> _feedKeyOf(String name) =>
+      _feedKeys.putIfAbsent(name, () => GlobalKey<HotFeedViewState>());
+
+  /// 桌面端刷新按钮：只重拉当前选中分类的 feed（与下拉刷新走同一条
+  /// _loadFirst 路径），其余分类的保活缓存不受影响。
+  void _refreshCurrent() {
+    final future = _feedKeys[_selectedName]?.currentState?.refresh();
+    if (future != null) unawaited(future);
+  }
+
   /// 已访问过的分类名：访问过的分类视图在 IndexedStack 里保活
   /// （列表、分页、滚动位置都保留），切回来不重新请求；
   /// 未访问的先占位，首次点开才创建并加载一次。
@@ -75,7 +91,21 @@ class _VideoTabScreenState extends State<VideoTabScreen> {
     final cs = Theme.of(context).colorScheme;
     final names = _tabs.keys.toList();
     return Scaffold(
-      appBar: AppBar(title: const Text('视频'), centerTitle: false),
+      appBar: AppBar(
+        title: const Text('视频'),
+        centerTitle: false,
+        actions: [
+          // 桌面端没有下拉手势：宽屏（≥900，与应用既有宽屏断点一致）
+          // 显示刷新按钮，只刷当前分类；窄屏不显示，继续下拉刷新。
+          if (MediaQuery.sizeOf(context).width >= 900)
+            IconButton(
+              key: const ValueKey('video-refresh-button'),
+              icon: const Icon(Icons.refresh),
+              tooltip: '刷新',
+              onPressed: _refreshCurrent,
+            ),
+        ],
+      ),
       body: Column(
         children: [
           SizedBox(
@@ -109,7 +139,7 @@ class _VideoTabScreenState extends State<VideoTabScreen> {
                 for (final name in names)
                   if (name == _selectedName || _visited.contains(name))
                     HotFeedView(
-                      key: ValueKey('video_$name'),
+                      key: _feedKeyOf(name),
                       channel: _channelFor(name),
                       filter: (s) =>
                           s.hasVideo || (s.retweeted?.hasVideo ?? false),

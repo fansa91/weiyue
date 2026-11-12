@@ -74,7 +74,13 @@ class _MediaKitLivePlayback implements LivePlayback {
 }
 
 /// 图库里的实况照片页：静图照常展示（手势缩放走 GestureImage），
-/// **长按播放动态部分**——按住开播、松手停播并回到静图；
+/// 动态部分有三条共用同一状态机的播放路径：
+/// - 移动端**长按**：按住开播、松手停播并回到静图；
+/// - 桌面端鼠标**悬停**：悬停在图片上自动开播、移开停播
+///   （MouseRegion 只对可悬停指针生效，触摸不触发）；
+/// - 点左上角 **LIVE 标识**：切换播放/暂停（全平台兜底）。
+/// 三条路径各自只维护一个「想播」意图，任一意图在场就播、全部
+/// 撤掉才停，互不打架（如长按中鼠标移开，长按意图仍在、继续播）。
 /// 视频层与图片同区域覆盖显示（IgnorePointer 不抢手势）。
 /// 播放优先主地址（media/play 包装地址），出错切模型里解出的
 /// .mov 兜底直链再试一次，再失败静默回静图（本页驻留期间不再重试，
@@ -107,8 +113,15 @@ class _LivePhotoViewState extends State<LivePhotoView> {
   LivePlayback? _playback;
   StreamSubscription<String>? _errorSub;
 
-  /// 手指正按住（长按已触发、未松手）。
-  bool _pressing = false;
+  /// 三条播放路径各自的「想播」意图（见类注释），任一为真就应播放。
+  bool _longPressing = false;
+  bool _hovering = false;
+  bool _toggleOn = false;
+
+  bool get _wantPlay => _longPressing || _hovering || _toggleOn;
+
+  /// 开播流程进行中（防悬停/长按/点标识并发重复开播）。
+  bool _starting = false;
 
   /// 视频层是否正盖在静图上。
   bool _showVideo = false;
@@ -134,15 +147,23 @@ class _LivePhotoViewState extends State<LivePhotoView> {
   void didUpdateWidget(covariant LivePhotoView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.pic.pid != widget.pic.pid) {
+      _clearIntents();
       _release();
       _dead = false;
     } else if (!widget.active && oldWidget.active) {
-      // 翻走：停播并释放播放器资源（翻回来长按会重新建）。
-      _pressing = false;
+      // 翻走：清掉全部播放意图、停播并释放播放器资源
+      //（翻回来重新触发任一路径会重新建）。
+      _clearIntents();
       _release();
       _dead = false;
       if (mounted) setState(() => _showVideo = false);
     }
+  }
+
+  void _clearIntents() {
+    _longPressing = false;
+    _hovering = false;
+    _toggleOn = false;
   }
 
   @override
@@ -159,30 +180,45 @@ class _LivePhotoViewState extends State<LivePhotoView> {
     _candidateIndex = -1;
   }
 
-  Future<void> _pressStart() async {
+  /// 意图变化后对齐播放状态：有任一意图想播就开播，全部撤掉就停播。
+  Future<void> _syncPlayback() async {
+    if (_wantPlay) {
+      await _startPlayback();
+    } else {
+      await _stopPlayback();
+    }
+  }
+
+  Future<void> _startPlayback() async {
+    if (_starting || _showVideo) return;
     if (!widget.active || _dead || _candidates.isEmpty) return;
-    _pressing = true;
-    var playback = _playback;
-    if (playback == null) {
-      try {
-        playback = (widget.playbackFactory ?? _mediaKitLivePlaybackFactory)();
-      } catch (_) {
-        // 原生库不可用等创建失败：静默保持静图
-        _dead = true;
+    _starting = true;
+    try {
+      var playback = _playback;
+      if (playback == null) {
+        try {
+          playback = (widget.playbackFactory ??
+              _mediaKitLivePlaybackFactory)();
+        } catch (_) {
+          // 原生库不可用等创建失败：静默保持静图
+          _dead = true;
+          return;
+        }
+        _playback = playback;
+        _errorSub = playback.errorStream.listen((_) => _onPlaybackError());
+      }
+      if (_candidateIndex >= 0) {
+        // 已开播过（停播只是暂停）：从头续播
+        await playback.seekToStart();
+        if (!mounted || !_wantPlay) return;
+        setState(() => _showVideo = true);
+        await playback.play();
         return;
       }
-      _playback = playback;
-      _errorSub = playback.errorStream.listen((_) => _onPlaybackError());
+      await _openCandidate(0);
+    } finally {
+      _starting = false;
     }
-    if (_candidateIndex >= 0) {
-      // 已开播过（松手只是暂停）：从头续播
-      await playback.seekToStart();
-      if (!mounted || !_pressing) return;
-      setState(() => _showVideo = true);
-      await playback.play();
-      return;
-    }
-    await _openCandidate(0);
   }
 
   Future<void> _openCandidate(int index) async {
@@ -204,51 +240,124 @@ class _LivePhotoViewState extends State<LivePhotoView> {
       return;
     }
     if (!mounted) return;
-    if (_pressing) {
+    if (_wantPlay) {
       setState(() => _showVideo = true);
       await playback.play();
     }
   }
 
   /// 播放中途出错（地址过期/网络失败）：还有候选就切下一个，
-  /// 没有就静默回静图。已松手（不在按压中）时忽略迟到的错误。
+  /// 没有就静默回静图。已无播放意图（停播中）时忽略迟到的错误。
   void _onPlaybackError() {
-    if (!mounted || !_pressing || _dead) return;
+    if (!mounted || !_wantPlay || _dead) return;
     unawaited(_openCandidate(_candidateIndex + 1));
   }
 
-  Future<void> _pressEnd() async {
-    if (!_pressing) return;
-    _pressing = false;
-    if (mounted) setState(() => _showVideo = false);
+  Future<void> _stopPlayback() async {
+    if (mounted && _showVideo) setState(() => _showVideo = false);
     final playback = _playback;
-    if (playback != null) {
+    if (playback != null && _candidateIndex >= 0) {
       await playback.pause();
       await playback.seekToStart();
     }
   }
 
+  void _onLongPressStart() {
+    _longPressing = true;
+    unawaited(_syncPlayback());
+  }
+
+  void _onLongPressEnd() {
+    if (!_longPressing) return;
+    _longPressing = false;
+    unawaited(_syncPlayback());
+  }
+
+  void _toggle() {
+    _toggleOn = !_toggleOn;
+    unawaited(_syncPlayback());
+  }
+
+  /// 左上角 LIVE 标识：点它切换播放/暂停（全平台兜底入口），
+  /// 小图标随播放状态变（播放中显示暂停、静图时显示播放）。
+  Widget _buildBadge() {
+    final playing = _showVideo;
+    return Positioned(
+      left: 12,
+      top: 12,
+      child: GestureDetector(
+        key: const ValueKey('gallery-live-badge'),
+        onTap: _toggle,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.62),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.motion_photos_on,
+                color: Colors.white,
+                size: 13,
+              ),
+              const SizedBox(width: 4),
+              const Text(
+                'LIVE',
+                style: TextStyle(color: Colors.white, fontSize: 11.5),
+              ),
+              const SizedBox(width: 3),
+              Icon(
+                playing ? Icons.pause : Icons.play_arrow,
+                key: ValueKey(
+                  playing ? 'live-badge-icon-pause' : 'live-badge-icon-play',
+                ),
+                color: Colors.white,
+                size: 12,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      // 长按识别与图片的缩放/翻页手势走手势竞技场：静止按住长按胜出，
-      // 一旦拖动则长按被取消（_pressEnd），不会边翻页边播。
-      onLongPressStart: (_) => unawaited(_pressStart()),
-      onLongPressEnd: (_) => unawaited(_pressEnd()),
-      onLongPressCancel: () => unawaited(_pressEnd()),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          GestureImage(
-            url: widget.imageUrl,
-            inPageView: true,
-            enableSlideOutPage: true,
-          ),
-          if (_showVideo && _playback != null)
-            Positioned.fill(
-              child: IgnorePointer(child: _playback!.buildSurface()),
+    return MouseRegion(
+      // 桌面端悬停播放：MouseRegion 只响应可悬停指针（鼠标），
+      // 触摸不会产生 enter/exit，移动端行为不受影响。
+      onEnter: (_) {
+        _hovering = true;
+        unawaited(_syncPlayback());
+      },
+      onExit: (_) {
+        _hovering = false;
+        unawaited(_syncPlayback());
+      },
+      child: GestureDetector(
+        // 长按识别与图片的缩放/翻页手势走手势竞技场：静止按住长按胜出，
+        // 一旦拖动则长按被取消（_onLongPressEnd），不会边翻页边播。
+        onLongPressStart: (_) => _onLongPressStart(),
+        onLongPressEnd: (_) => _onLongPressEnd(),
+        onLongPressCancel: _onLongPressEnd,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            GestureImage(
+              url: widget.imageUrl,
+              inPageView: true,
+              enableSlideOutPage: true,
             ),
-        ],
+            if (_showVideo && _playback != null)
+              Positioned.fill(
+                child: IgnorePointer(child: _playback!.buildSurface()),
+              ),
+            _buildBadge(),
+          ],
+        ),
       ),
     );
   }

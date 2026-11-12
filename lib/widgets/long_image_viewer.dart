@@ -200,6 +200,8 @@ class _LongImageReaderState extends State<LongImageReader> {
         canNext: _index < widget.pics.length - 1,
         onPrev: () => _goTo(_index - 1),
         onNext: () => _goTo(_index + 1),
+        // 与图库统一：桌面端 Esc 关闭（共用快捷键组件顺带生效）。
+        onClose: () => Navigator.of(context).pop(),
         child: Stack(
           children: [
             _scrollMode ? _buildScrollBody(pic) : _buildZoomBody(pic),

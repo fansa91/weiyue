@@ -70,8 +70,12 @@ class CountingFeedService extends FakeWeiyueService {
   }
 }
 
-Finder _feedList(String hotFeedKey) => find.descendant(
-  of: find.byKey(ValueKey(hotFeedKey)),
+/// 按频道 gid 找其 feed 内的列表（feed 用 GlobalKey 保活、不挂
+/// ValueKey，按 widget 的 channel 属性定位）。
+Finder _feedList(String gid) => find.descendant(
+  of: find.byWidgetPredicate(
+    (w) => w is HotFeedView && w.channel.gid == gid,
+  ),
   matching: find.byType(ListView),
 );
 
@@ -175,7 +179,7 @@ void main() {
 
       // 滚到底触发第二页
       await tester.drag(
-        _feedList('102803_102803'),
+        _feedList('102803'),
         const Offset(0, -2400),
       );
       await _settle(tester);
@@ -191,13 +195,13 @@ void main() {
 
       // 再滚到底：下一次请求必须是 freshIdx=3（从已加载页数继续）
       await tester.fling(
-        _feedList('102803_102803'),
+        _feedList('102803'),
         const Offset(0, -800),
         1600,
       );
       await _settle(tester);
       await tester.fling(
-        _feedList('102803_102803'),
+        _feedList('102803'),
         const Offset(0, -800),
         1600,
       );

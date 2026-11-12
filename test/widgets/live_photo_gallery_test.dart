@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:extended_image_plus/extended_image_plus.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_image_mock/network_image_mock.dart';
@@ -237,6 +238,89 @@ void main() {
       expect(find.byKey(const ValueKey('fake-live-surface')), findsNothing);
       await gesture.up();
       await tester.pump();
+    });
+  });
+
+  testWidgets('点 LIVE 标识：切换播放/暂停，小图标随状态变', (tester) async {
+    final fake = FakeLivePlayback();
+    await mockNetworkImagesFor(() async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LivePhotoView(
+            pic: _livePic,
+            imageUrl: _livePic.large,
+            playbackFactory: () => fake,
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey('live-badge-icon-play')), findsOneWidget);
+      expect(find.byKey(const ValueKey('fake-live-surface')), findsNothing);
+
+      // 点标识开播：打开主地址、视频层出现、图标变暂停
+      await tester.tap(find.byKey(const ValueKey('gallery-live-badge')));
+      await tester.pump();
+      await tester.pump();
+      expect(fake.openedUrls, [_livePic.liveVideoUrl]);
+      expect(fake.playCount, 1);
+      expect(find.byKey(const ValueKey('fake-live-surface')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('live-badge-icon-pause')),
+        findsOneWidget,
+      );
+
+      // 再点标识停播：暂停、视频层撤下、图标回播放
+      await tester.tap(find.byKey(const ValueKey('gallery-live-badge')));
+      await tester.pump();
+      await tester.pump();
+      expect(fake.pauseCount, greaterThanOrEqualTo(1));
+      expect(find.byKey(const ValueKey('fake-live-surface')), findsNothing);
+      expect(find.byKey(const ValueKey('live-badge-icon-play')), findsOneWidget);
+    });
+  });
+
+  testWidgets('桌面悬停：鼠标移入自动播放、移出停止（触摸不触发）', (tester) async {
+    final fake = FakeLivePlayback();
+    await mockNetworkImagesFor(() async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Center(
+            child: SizedBox(
+              width: 300,
+              height: 300,
+              child: LivePhotoView(
+                pic: _livePic,
+                imageUrl: _livePic.large,
+                playbackFactory: () => fake,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      final mouse = await tester.createGesture(
+        kind: PointerDeviceKind.mouse,
+      );
+      // 指针先落在视图外（左上角），不应触发播放
+      await mouse.addPointer(location: const Offset(10, 10));
+      await tester.pump();
+      expect(fake.playCount, 0);
+
+      // 移入图片区域：自动开播
+      await mouse.moveTo(tester.getCenter(find.byType(LivePhotoView)));
+      await tester.pump();
+      await tester.pump();
+      expect(fake.openedUrls, [_livePic.liveVideoUrl]);
+      expect(fake.playCount, 1);
+      expect(find.byKey(const ValueKey('fake-live-surface')), findsOneWidget);
+
+      // 移出：停播回静图
+      await mouse.moveTo(const Offset(10, 10));
+      await tester.pump();
+      await tester.pump();
+      expect(fake.pauseCount, greaterThanOrEqualTo(1));
+      expect(find.byKey(const ValueKey('fake-live-surface')), findsNothing);
+      await mouse.removePointer();
     });
   });
 

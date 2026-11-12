@@ -11,10 +11,10 @@ class FriendsFeedView extends StatefulWidget {
   const FriendsFeedView({super.key});
 
   @override
-  State<FriendsFeedView> createState() => _FriendsFeedViewState();
+  State<FriendsFeedView> createState() => FriendsFeedViewState();
 }
 
-class _FriendsFeedViewState extends State<FriendsFeedView> {
+class FriendsFeedViewState extends State<FriendsFeedView> {
   final _scroll = ScrollController();
   final List<WbStatus> _items = [];
   bool _loading = false;
@@ -41,6 +41,10 @@ class _FriendsFeedViewState extends State<FriendsFeedView> {
       _loadMore();
     }
   }
+
+  /// 对外刷新句柄（桌面端刷新按钮经 GlobalKey 调用）：与下拉刷新
+  /// 同一条路径，从第一页重新拉取关注流。
+  Future<void> refresh() => _loadFirst();
 
   Future<void> _loadFirst() async {
     setState(() {

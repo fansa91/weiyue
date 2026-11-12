@@ -98,6 +98,8 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
           canNext: _index < widget.pics.length - 1,
           onPrev: () => _goTo(_index - 1),
           onNext: () => _goTo(_index + 1),
+          // 桌面端：Esc 关闭图库。
+          onClose: () => Navigator.of(context).pop(),
           child: Stack(
             children: [
               ExtendedImageGesturePageView.builder(
@@ -121,39 +123,8 @@ class _PhotoGalleryScreenState extends State<PhotoGalleryScreen> {
                   );
                 },
               ),
-              // 当前页是实况照片：左上角克制的 LIVE 标识
-              //（长按图片播放动态部分，见 LivePhotoView）。
-              if (widget.pics[_index].isLivePhoto)
-                Positioned(
-                  left: 12,
-                  top: 12,
-                  child: Container(
-                    key: const ValueKey('gallery-live-badge'),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.62),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.motion_photos_on,
-                          color: Colors.white,
-                          size: 13,
-                        ),
-                        SizedBox(width: 4),
-                        Text(
-                          'LIVE',
-                          style: TextStyle(color: Colors.white, fontSize: 11.5),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+              // 实况照片的 LIVE 标识由 LivePhotoView 自带（点标识切换
+              // 播放/暂停，需就近持有播放状态，故不在图库层画）。
               // 桌面/宽屏：查看区两侧上一张/下一张按钮（移动端靠手势，不显示）
               if (showSideButtons)
                 Positioned.fill(

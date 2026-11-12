@@ -79,6 +79,60 @@ void main() {
     });
   });
 
+  testWidgets('图库：Esc 关闭返回', (tester) async {
+    await mockNetworkImagesFor(() async {
+      _setSize(tester, const Size(1500, 900));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => PhotoGalleryScreen(pics: _pics),
+                ),
+              ),
+              child: const Text('open-gallery'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open-gallery'));
+      await _pumpSteps(tester);
+      expect(find.byType(PhotoGalleryScreen), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await _pumpSteps(tester);
+      expect(find.byType(PhotoGalleryScreen), findsNothing);
+    });
+  });
+
+  testWidgets('长图阅读器：Esc 关闭返回（共用快捷键组件顺带生效）', (tester) async {
+    await mockNetworkImagesFor(() async {
+      _setSize(tester, const Size(1500, 900));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => ElevatedButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => LongImageReader(pics: _pics),
+                ),
+              ),
+              child: const Text('open-reader'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open-reader'));
+      await _pumpSteps(tester);
+      expect(find.byType(LongImageReader), findsOneWidget);
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await _pumpSteps(tester);
+      expect(find.byType(LongImageReader), findsNothing);
+    });
+  });
+
   testWidgets('长图阅读器宽屏：两侧按钮可见且可翻页', (tester) async {
     await mockNetworkImagesFor(() async {
       _setSize(tester, const Size(1500, 900));
