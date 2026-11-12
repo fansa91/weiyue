@@ -26,6 +26,8 @@ dependencies:
   package_info_plus: ^10.2.2
   gal: ^2.3.3
   path_provider: ^2.1.6
+  image_picker: ^1.1.2
+  file_selector: ^1.0.3
 
 dependency_overrides:
   # flutter_inappwebview 已发布最新版 6.1.5（2024-10）的 Android 实现

@@ -16,6 +16,10 @@ class Emoticons {
 
   static String? urlOf(String phrase) => _map[phrase];
 
+  /// 全部表情短码（含方括号，如 `[微笑]`，保持映射装入顺序）：
+  /// 发帖页表情面板据此逐个取 [urlOf] 渲染并插入短码原文。
+  static List<String> get phrases => List.unmodifiable(_map.keys);
+
   static void install(Map<String, String> map) {
     if (map.isEmpty) return;
     _map = map;

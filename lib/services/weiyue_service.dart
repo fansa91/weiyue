@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -1558,11 +1560,7 @@ class WeiyueService {
     int count = 20,
   }) async {
     final prefix = gid.length >= 5 ? gid.substring(0, 5) : gid;
-    final friendsFamily = const {
-      '11000',
-      '11001',
-      '11002',
-    }.contains(prefix);
+    final friendsFamily = const {'11000', '11001', '11002'}.contains(prefix);
     final json = await _get(
       WbStack.pc,
       friendsFamily
@@ -1822,13 +1820,7 @@ class WeiyueService {
     }
     if (raw.isEmpty) raw = _asList(json['data']);
     if (raw.isEmpty) {
-      for (final k in [
-        typeKey,
-        'list',
-        'statuses',
-        'comments',
-        'attitudes',
-      ]) {
+      for (final k in [typeKey, 'list', 'statuses', 'comments', 'attitudes']) {
         raw = _asList(json[k]);
         if (raw.isNotEmpty) break;
       }
@@ -1846,9 +1838,7 @@ class WeiyueService {
     if (hasMore) {
       bool live(String c) => c.isNotEmpty && c != '0';
       if (typeKey == 'list') {
-        hasMore = nextSinceId.isNotEmpty
-            ? live(nextSinceId)
-            : live(nextMaxId);
+        hasMore = nextSinceId.isNotEmpty ? live(nextSinceId) : live(nextMaxId);
       } else {
         hasMore = nextMaxId.isNotEmpty ? live(nextMaxId) : live(nextSinceId);
       }
@@ -2259,8 +2249,7 @@ class WeiyueService {
       throw const WeiyueException(msg);
     }
     if (json == null) {
-      final msg =
-          '接口返回非 JSON（HTTP $status，${bodyFingerprint(rawBody)}）';
+      final msg = '接口返回非 JSON（HTTP $status，${bodyFingerprint(rawBody)}）';
       session.recordLoginFailure(path, msg);
       throw WeiyueException(msg);
     }
@@ -2489,5 +2478,205 @@ class WeiyueService {
       form: {'id': id},
       referer: _detailReferer(id),
     );
+  }
+
+  /// 发帖（纯文字/带图）：POST /ajax/statuses/update，走 _post 写通道。
+  /// 表单逐字对齐主包发布器 toolbarPublish 的组装
+  /// （`{content, pic_id: handlePic(), visible, share_id, media, vote}`
+  /// 经 qs.stringify 表单编码）：无媒体/投票/分享时 media/vote/share_id
+  /// 恒为空串、visible 恒 0（公开）；
+  /// pic_id 无图时为空串，有图时是 handlePic 的 JSON 串——数组元素
+  /// `{type, media_id, pid, short_url, media_group_id}`，其中普通上传图
+  /// 只有 type（文件 MIME）与 pid 有值，其余键在网页端为 undefined
+  /// 被 JSON.stringify 丢弃，故这里只组装 type+pid 两键（顺序同主包）。
+  /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
+  Future<void> publishStatus(
+    String content, {
+    List<({String pid, String type})> pics = const [],
+  }) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/update',
+      form: {
+        'content': content,
+        'pic_id': pics.isEmpty
+            ? ''
+            : jsonEncode([
+                for (final p in pics) {'type': p.type, 'pid': p.pid},
+              ]),
+        'visible': 0,
+        'share_id': '',
+        'media': '',
+        'vote': '',
+      },
+      referer: 'https://weibo.com/',
+    );
+  }
+
+  /// 标准 CRC32（IEEE 多项式，与主包 b_crc32 同算法：初值/终值
+  /// 0xFFFFFFFF，结果取无符号 32 位整数）。上传参数 cs 用它的
+  /// 十进制字符串形态（主包把返回值直接交给 qs.stringify）。
+  static int crc32OfBytes(List<int> bytes) {
+    final table = _crc32Table ??= _buildCrc32Table();
+    var c = 0xFFFFFFFF;
+    for (final b in bytes) {
+      c = (c >>> 8) ^ table[(c ^ b) & 0xFF];
+    }
+    return (c ^ 0xFFFFFFFF) & 0xFFFFFFFF;
+  }
+
+  static List<int>? _crc32Table;
+
+  static List<int> _buildCrc32Table() {
+    final table = List<int>.filled(256, 0);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) {
+        c = (c & 1) != 0 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+      }
+      table[n] = c & 0xFFFFFFFF;
+    }
+    return table;
+  }
+
+  /// picupload 上传失败 errno → 文案（主包 UploadExpection 错误表原文，
+  /// 取常见项；未列出的只报编号）。
+  static const _uploadErrnoMessages = <int, String>{
+    1: '用户未登录',
+    2: '上传数据无效',
+    3: '回调地址无效',
+    4: '未找到上传文件',
+    5: '无权上传',
+    6: '上传uid无效',
+    7: '未指定返回信息类型',
+    8: '上传数据出错',
+    9: '上传MIME类型不支持',
+    10: '上传文件大小无效',
+    11: '存储出错',
+    12: '上传EXIF信息过长',
+    13: '上传回调出错',
+    14: '回调返回出错',
+    15: '错误的请求',
+    -1: '没有登录',
+    -2: '没有收到POST数据',
+    -3: '没有指定cb参数',
+    -4: '没有发现提交上传文件',
+    -5: '该app没有开放图片上传服务',
+    -6: 'uid非法',
+    -7: '参数s值不支持',
+    -8: '数据上传失败',
+    -9: '文件mime类型不支持',
+    -10: '文件字节数超过限制',
+    -11: '存储错误',
+    -12: '图片exif信息超长(2k)',
+  };
+
+  static const _picUploadUrl =
+      'https://picupload.weibo.com/interface/upload.php';
+
+  /// 图片上传（发帖配图）：返回服务端 pid。
+  ///
+  /// 形态逐字对齐主包 uploadWithFile$3 在发布器图片组件的调用
+  /// （`uploadWithFile$3(file, {pri: 0}, /*分流标志*/ 1, /*source*/ 1)`，
+  /// 走 upload.php 分支）：
+  /// - POST https://picupload.weibo.com/interface/upload.php，
+  ///   查询参数（顺序同主包对象字面量）：file_source=1、
+  ///   cs=图片字节的 CRC32（无符号十进制）、ent=miniblog、
+  ///   appid=339644097、uid=当前登录 uid、raw_md5=字节 MD5 十六进制、
+  ///   ori=1、pri=0、request_id=毫秒时间戳、file_size=字节数；
+  ///   主包另在用户开启水印时带 mpos/nick（取自页面配置的水印设置，
+  ///   本端无从得知，不带）；
+  /// - 请求体是图片原始字节，Content-Type: application/octet-stream；
+  /// - 网页端为此另起 axios 实例：**显式删掉 X-Requested-With、
+  ///   不带 X-Xsrf-Token**（xsrfCookieName 置空），只靠 Cookie 登录态
+  ///   ——故本方法不复用 _post/_requestHeaders，只组装 Cookie/UA/
+  ///   Referer 三个头；无登录会话时与 _post 同口径本地拦截不发请求，
+  ///   但不要求 XSRF 令牌（上传链路本身不用它）；
+  /// - 成功响应 `{ret: 真值, pic: {pid}}` 取 pid；失败
+  ///   `{ret: false, errno}` 按主包错误表抛「上传图片失败：…（errno）」。
+  /// ⚠️ 登录态上传无法在本机实测（纪律：不用真实账号），待真机验证。
+  Future<String> uploadPicture(List<int> bytes) async {
+    const path = '/interface/upload.php';
+    if (!session.hasUsableCookie(WbStack.pc)) {
+      session.recordLoginFailure(path, '请先登录');
+      throw const WeiyueException('请先登录');
+    }
+    final uid = session.uid;
+    final query = <String, String>{
+      'file_source': '1',
+      'cs': '${crc32OfBytes(bytes)}',
+      'ent': 'miniblog',
+      'appid': '339644097',
+      if (uid.isNotEmpty) 'uid': uid,
+      'raw_md5': md5.convert(bytes).toString(),
+      'ori': '1',
+      'pri': '0',
+      'request_id': '${DateTime.now().millisecondsSinceEpoch}',
+      'file_size': '${bytes.length}',
+    };
+    final url = Uri.parse(_picUploadUrl).replace(queryParameters: query);
+    final Response<dynamic> resp;
+    try {
+      resp = await _pc.post<dynamic>(
+        url.toString(),
+        data: Uint8List.fromList(bytes),
+        options: Options(
+          contentType: 'application/octet-stream',
+          sendTimeout: const Duration(minutes: 2),
+          receiveTimeout: const Duration(minutes: 2),
+          headers: {
+            'User-Agent': visitor.uaOf(WbStack.pc),
+            'Referer': 'https://weibo.com/',
+            'Cookie': session.cookieHeaderFor(WbStack.pc)!,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      final msg = '网络错误：${e.message ?? e.type.name}';
+      session.recordLoginFailure(path, msg);
+      throw WeiyueException(msg);
+    }
+    final status = resp.statusCode ?? 0;
+    final data = resp.data;
+    Map<String, dynamic>? json;
+    if (data is Map) {
+      json = _asMap(data);
+    } else if (data is String && data.trim().startsWith('{')) {
+      try {
+        final decoded = jsonDecode(data);
+        if (decoded is Map) json = _asMap(decoded);
+      } on FormatException {
+        json = null;
+      }
+    }
+    final location = resp.headers.value('location') ?? '';
+    final rawBody = data is String ? data : '';
+    if (_notLoggedInSignal(status, json, location, rawBody)) {
+      session.markExpired();
+      const msg = '登录态已失效，请重新登录';
+      session.recordLoginFailure(path, msg);
+      throw const WeiyueException(msg);
+    }
+    if (json == null) {
+      final msg = '接口返回非 JSON（HTTP $status，${bodyFingerprint(rawBody)}）';
+      session.recordLoginFailure(path, msg);
+      throw WeiyueException(msg);
+    }
+    final ret = json['ret'];
+    if (ret == false || ret == 0 || ret == 'false') {
+      final errno = _intOf(json['errno']);
+      final text = _uploadErrnoMessages[errno];
+      final msg = text != null ? '上传图片失败：$text（$errno）' : '上传图片失败（错误码 $errno）';
+      session.recordLoginFailure(path, msg);
+      throw WeiyueException(msg);
+    }
+    final pic = _asMap(json['pic']);
+    final pid = '${pic['pid'] ?? ''}';
+    if (pid.isEmpty) {
+      const msg = '上传图片失败：服务器未返回图片 id';
+      session.recordLoginFailure(path, msg);
+      throw const WeiyueException(msg);
+    }
+    return pid;
   }
 }
