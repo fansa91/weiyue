@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/models.dart';
 import '../screens/detail_screen.dart';
 import '../screens/profile_screen.dart';
+import '../screens/super_topic_screen.dart';
 import '../screens/topic_screen.dart';
 import '../widgets/detail_scaffold.dart';
 
@@ -27,6 +28,22 @@ Future<void> openDetail(BuildContext context, WbStatus status) async {
       ..hideCurrentSnackBar()
       ..showSnackBar(const SnackBar(content: Text('动态已删除')));
   }
+}
+
+/// 打开超话页（pageId 为整串 100808…；带关注/签到区）。
+void openSuperTopic(
+  BuildContext context,
+  String pageId,
+  String title, {
+  String cover = '',
+}) {
+  if (!pageId.startsWith('100808')) return;
+  final name = title.replaceAll(RegExp(r'^#+|#+$'), '').trim();
+  Navigator.of(context).push(MaterialPageRoute(
+    builder: (_) => DetailScaffold(
+      child: SuperTopicScreen(pageId: pageId, title: name, cover: cover),
+    ),
+  ));
 }
 
 /// 打开话题页。[token] 可以是正文里的原始分段（含两端 #）或裸话题名。

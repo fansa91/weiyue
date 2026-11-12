@@ -1055,6 +1055,155 @@ class WeiyueService {
     return _parseContainer(data);
   }
 
+  // ---------------- 超话 ----------------
+
+  /// 超话帖子流：m 容器 100808{page_id}（page_id 整串即容器 id，
+  /// 与搜索超话条目 scheme 的 containerid 同值），翻页规则同话题页。
+  Future<ContainerPage> getSuperTopicStatuses(
+    String pageId, {
+    int page = 1,
+  }) async {
+    final data = await _container({
+      'containerid': pageId,
+      'page': page,
+    }, referer: 'https://m.weibo.cn/p/index?containerid=$pageId');
+    return _parseContainer(data);
+  }
+
+  /// 超话页状态：GET /ajax_proxy/chaohua/page/extend（2026-11-12
+  /// 主包 chaohua 模块 fetchExtendData 逐字实证：参数 {page_id,
+  /// show_recommend:1}，响应字段 is_followed / follow_btn_text /
+  /// is_checked 直接挂在响应体上）。访客态字段可能缺失，按未关注/
+  /// 未签到防御解析；失败原样上抛，调用方决定是否展示按钮区。
+  Future<SuperTopicState> getSuperTopicState(String pageId) async {
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax_proxy/chaohua/page/extend',
+      query: {'page_id': pageId, 'show_recommend': 1},
+      referer: 'https://weibo.com/p/$pageId',
+    );
+    final data = _asMap(json['data']);
+    final src = (json['is_followed'] != null || json['is_checked'] != null)
+        ? json
+        : data;
+    return SuperTopicState(
+      isFollowed: src['is_followed'] == true,
+      followBtnText: '${src['follow_btn_text'] ?? ''}',
+      isChecked: src['is_checked'] == true,
+    );
+  }
+
+  /// chaohua 族表单 POST（关注/取关/签到共用）：主包模块以裸 axios
+  /// 直发 form（Content-Type + X-Requested-With 逐字），响应是
+  /// {code, msg, ...} 码信封而非 ok 信封，故不走 _post。
+  /// code "100003"（msg「请先登录」）→ 标记过期抛登录失效；
+  /// 其余码原样返回由各方法按成功码判定。
+  Future<Map<String, dynamic>> _chaohuaPost(
+    String path,
+    Map<String, String> form,
+  ) async {
+    if (!session.hasUsableCookie(WbStack.pc)) {
+      session.recordLoginFailure(path, '请先登录');
+      throw const WeiyueException('请先登录');
+    }
+    final Response<dynamic> resp;
+    try {
+      resp = await _pc.post<dynamic>(
+        '$_pcBase$path',
+        data: form,
+        options: Options(
+          contentType: Headers.formUrlEncodedContentType,
+          headers: _requestHeaders(
+            WbStack.pc,
+            cookie: session.cookieHeaderFor(WbStack.pc)!,
+            useSession: true,
+            referer: 'https://weibo.com/',
+          ),
+        ),
+      );
+    } on DioException catch (e) {
+      final msg = '网络错误：${e.message ?? e.type.name}';
+      session.recordLoginFailure(path, msg);
+      throw WeiyueException(msg);
+    }
+    final data = resp.data;
+    if (data is! Map) {
+      final rawBody = data is String ? data : '';
+      final msg =
+          '接口返回非 JSON（HTTP ${resp.statusCode ?? 0}，${bodyFingerprint(rawBody)}）';
+      session.recordLoginFailure(path, msg);
+      throw WeiyueException(msg);
+    }
+    final json = _asMap(data);
+    final code = '${json['code'] ?? ''}';
+    final msg = _firstErrorText([json['msg']]);
+    if (code == '100003' || msg == '请先登录') {
+      session.markExpired();
+      const m = '登录态已失效，请重新登录';
+      session.recordLoginFailure(path, m);
+      throw const WeiyueException(m);
+    }
+    return json;
+  }
+
+  /// 关注超话：POST /ajax_proxy/chaohua/page/follow（主包 chaohua
+  /// 模块 pn() 逐字：表单只有 {page_id}，成功 code==100000，
+  /// 回 follow_btn_text）。返回服务端给的按钮文案（可能为空）。
+  /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
+  Future<String> followSuperTopic(String pageId) async {
+    final json = await _chaohuaPost('/ajax_proxy/chaohua/page/follow', {
+      'page_id': pageId,
+    });
+    if ('${json['code'] ?? ''}' != '100000') {
+      throw WeiyueException(
+        _firstErrorText([json['msg'], '关注失败']),
+      );
+    }
+    return '${json['follow_btn_text'] ?? ''}';
+  }
+
+  /// 取关超话：POST /ajax_proxy/chaohua/page/unfollow（同上，
+  /// 成功 code==10000——与 follow 不同码，主包逐字）。
+  Future<String> unfollowSuperTopic(String pageId) async {
+    final json = await _chaohuaPost('/ajax_proxy/chaohua/page/unfollow', {
+      'page_id': pageId,
+    });
+    if ('${json['code'] ?? ''}' != '10000') {
+      throw WeiyueException(
+        _firstErrorText([json['msg'], '取消关注失败']),
+      );
+    }
+    return '${json['follow_btn_text'] ?? ''}';
+  }
+
+  /// 超话签到：POST /ajax_proxy/chaohua/page/checkin（主包 chaohua
+  /// 模块 nn() 逐字：表单 {scene_id:"pc_checkin", page_id, timezone,
+  /// lang, plat, ua}；成功 code==100000 回 title/sub_title）。
+  /// timezone/lang/plat/ua 是浏览器环境描述：客户端以本机时区名、
+  /// zh-CN 与系统名尽力填充（ua 无对应物留空），核心参数
+  /// scene_id/page_id 逐字。
+  Future<({String title, String subTitle})> checkinSuperTopic(
+    String pageId,
+  ) async {
+    final json = await _chaohuaPost('/ajax_proxy/chaohua/page/checkin', {
+      'scene_id': 'pc_checkin',
+      'page_id': pageId,
+      'timezone': DateTime.now().timeZoneName,
+      'lang': 'zh-CN',
+      'plat': '',
+      'ua': '',
+    });
+    if ('${json['code'] ?? ''}' != '100000') {
+      throw WeiyueException(
+        _firstErrorText([json['msg'], '签到失败']),
+      );
+    }
+    return (
+      title: '${json['title'] ?? ''}'.isEmpty ? '签到成功' : '${json['title']}',
+      subTitle: '${json['sub_title'] ?? ''}',
+    );
+  }
+
   // ---------------- 主页精选 / 文章 ----------------
 
   final Map<String, String> _featuredItemIds = {};

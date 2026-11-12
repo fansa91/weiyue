@@ -571,7 +571,16 @@ class _TopicRow extends StatelessWidget {
                   ),
               ],
             ),
-      onTap: () => openTopic(context, entry.title),
+      onTap: () {
+        // 超话条目（scheme containerid=100808…）进超话页（带关注/签到），
+        // 其余仍走普通话题页。
+        final pageId = entry.superPageId;
+        if (pageId != null) {
+          openSuperTopic(context, pageId, entry.title, cover: entry.pic);
+        } else {
+          openTopic(context, entry.title);
+        }
+      },
     );
   }
 }

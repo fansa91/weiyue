@@ -1188,6 +1188,39 @@ class WbTopicEntry {
         pic: httpsUrl(_strOf(j['pic'])),
         scheme: _strOf(j['scheme']),
       );
+
+  /// scheme 的 containerid 为 100808… 时即超话页 id（整串就是
+  /// chaohua 族接口的 page_id、也是 m 容器 id）；普通话题
+  /// （231522…）或解析不到返回 null。
+  String? get superPageId {
+    final cid = Uri.tryParse(scheme)?.queryParameters['containerid'] ?? '';
+    return cid.startsWith('100808') ? cid : null;
+  }
+}
+
+/// 超话页状态（chaohua/page/extend 响应字段，主包实证）：
+/// 关注态与按钮文案、今日签到态。按钮文案为空时用关注态推导。
+class SuperTopicState {
+  final bool isFollowed;
+  final String followBtnText;
+  final bool isChecked;
+
+  const SuperTopicState({
+    this.isFollowed = false,
+    this.followBtnText = '',
+    this.isChecked = false,
+  });
+
+  SuperTopicState copyWith({
+    bool? isFollowed,
+    String? followBtnText,
+    bool? isChecked,
+  }) =>
+      SuperTopicState(
+        isFollowed: isFollowed ?? this.isFollowed,
+        followBtnText: followBtnText ?? this.followBtnText,
+        isChecked: isChecked ?? this.isChecked,
+      );
 }
 
 /// 一个分类的一页搜索结果（按分类只填对应列表）。
