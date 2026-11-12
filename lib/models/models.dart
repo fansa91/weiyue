@@ -1198,6 +1198,80 @@ class WbTopicEntry {
   }
 }
 
+/// 本人资料编辑页数据（GET /ajax/setting/getBasicInfo，主包编辑资料
+/// 页实证）：data 是字段本体，顶层另带 province/city 地区名字典
+/// （city 以省名为键）。province/city 本体是代码串。
+class ProfileBasicInfo {
+  final String screenName;
+  final String description;
+  final String gender; // 'm' / 'f' / 其他（含空）
+  final String birthday; // 'yyyy-MM-dd' 或 ''
+  final int birthdayVisible;
+  final String province;
+  final String city;
+  final String single; // 情感状态码（见 emotionOptions）
+  final Map<String, String> provinceNames;
+  final Map<String, Map<String, String>> cityNames;
+
+  const ProfileBasicInfo({
+    this.screenName = '',
+    this.description = '',
+    this.gender = '',
+    this.birthday = '',
+    this.birthdayVisible = 0,
+    this.province = '',
+    this.city = '',
+    this.single = '',
+    this.provinceNames = const {},
+    this.cityNames = const {},
+  });
+
+  /// 情感状态选项（主包 useEmotion 选项表逐字）。
+  static const emotionOptions = <({String value, String label})>[
+    (value: '1', label: '单身'),
+    (value: '2', label: '求交往'),
+    (value: '3', label: '暗恋中'),
+    (value: '4', label: '暧昧中'),
+    (value: '5', label: '恋爱中'),
+    (value: '6', label: '订婚'),
+    (value: '7', label: '已婚'),
+    (value: '8', label: '分居'),
+    (value: '9', label: '离异'),
+    (value: '10', label: '丧偶'),
+    (value: '0', label: '不选'),
+  ];
+
+  String get provinceName => provinceNames[province] ?? '';
+
+  Map<String, String> get cityOptions =>
+      cityNames[provinceName] ?? const {};
+
+  String get cityName => cityOptions[city] ?? '';
+
+  factory ProfileBasicInfo.fromResponse(Map<String, dynamic> json) {
+    final d = _mapOf(json['data']);
+    Map<String, String> strMap(dynamic v) => _mapOf(v).map(
+          (k, val) => MapEntry(k, _strOf(val)),
+        );
+    final cities = <String, Map<String, String>>{};
+    for (final e in _mapOf(json['city']).entries) {
+      cities[e.key] = strMap(e.value);
+    }
+    return ProfileBasicInfo(
+      screenName: _strOf(d['screen_name']),
+      description: _strOf(d['description']),
+      gender: _strOf(d['gender']),
+      birthday: _strOf(d['birthday']),
+      birthdayVisible: _intOf(d['birthday_visible']),
+      province: _strOf(d['province']),
+      city: _strOf(d['city']),
+      single: _strOf(d['single']),
+      provinceNames: strMap(json['province']),
+      cityNames: cities,
+    );
+  }
+}
+
 /// 超话页状态（chaohua/page/extend 响应字段，主包实证）：
 /// 关注态与按钮文案、今日签到态。按钮文案为空时用关注态推导。
 class SuperTopicState {

@@ -758,6 +758,54 @@ class WeiyueService {
     }
   }
 
+  // ---------------- 编辑资料（登录态） ----------------
+
+  /// 本人资料（编辑页预填）：GET /ajax/setting/getBasicInfo
+  /// （2026-11-12 主包编辑资料页逐字实证：ok>0 时 data 是字段本体，
+  /// 顶层另带 province/city 地区名字典）。仅登录态（sessionOnly），
+  /// 未登录由 _get 抛「登录态未生效」类错误。
+  /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
+  Future<ProfileBasicInfo> getProfileBasicInfo() async {
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/setting/getBasicInfo',
+      sessionOnly: true,
+      referer: 'https://weibo.com/setting',
+    );
+    final ok = json['ok'];
+    if (ok == 0 || ok == '0' || ok == false) {
+      throw WeiyueException(
+        _firstErrorText([json['msg'], json['error'], '获取资料失败']),
+      );
+    }
+    return ProfileBasicInfo.fromResponse(json);
+  }
+
+  /// 资料字段保存：POST /ajax/setting/updateProfileBasic（主包逐字：
+  /// 网页端逐字段单提交——{screen_name} / {description, desc_empty} /
+  /// {gender} / {birthday} / {province} / {province, city}）。
+  /// 成功返回服务端 msg（昵称保存时有提示文案，其余多为空串）。
+  Future<String> updateProfileBasic(Map<String, dynamic> form) async {
+    final json = await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/setting/updateProfileBasic',
+      form: form,
+      referer: 'https://weibo.com/setting',
+    );
+    return _firstErrorText([json['msg'], _asMap(json['data'])['msg']]);
+  }
+
+  /// 情感状态保存：POST /ajax/setting/updateProfileExtend
+  /// （主包 useEmotion 逐字：表单只有 {single: 选项值}）。
+  Future<void> updateProfileSingle(String value) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/setting/updateProfileExtend',
+      form: {'single': value},
+      referer: 'https://weibo.com/setting',
+    );
+  }
+
   /// m 容器泛型请求，返回 data
   Future<Map<String, dynamic>> _container(
     Map<String, dynamic> query, {

@@ -7,6 +7,7 @@ import '../services/session_service.dart';
 import '../services/visitor_service.dart';
 import '../services/weiyue_service.dart';
 import '../widgets/network_image.dart';
+import 'edit_profile_screen.dart';
 import 'favorites_screen.dart';
 import 'likes_screen.dart';
 import 'following_screen.dart';
@@ -61,6 +62,21 @@ class _MeScreenState extends State<MeScreen> {
     } finally {
       if (mounted) setState(() => _refreshing = false);
     }
+  }
+
+  /// 已登录账号卡底部的动作行：编辑资料（多账号切换在同一行扩展）。
+  Widget _accountActionsRow(BuildContext context) {
+    return Row(
+      children: [
+        TextButton.icon(
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const EditProfileScreen()),
+          ),
+          icon: const Icon(Icons.edit_outlined, size: 18),
+          label: const Text('编辑资料'),
+        ),
+      ],
+    );
   }
 
   Future<void> _openLogin() async {
@@ -501,6 +517,8 @@ class _MeScreenState extends State<MeScreen> {
             ),
             const SizedBox(height: 10),
             ..._sessionStatusRows(context, session),
+            const SizedBox(height: 6),
+            _accountActionsRow(context),
           ],
         ),
       ),
@@ -684,6 +702,8 @@ class _MeScreenState extends State<MeScreen> {
                 ),
                 const SizedBox(height: 10),
                 ..._sessionStatusRows(context, session),
+                const SizedBox(height: 6),
+                _accountActionsRow(context),
               ],
             ),
           ),
