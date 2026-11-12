@@ -782,6 +782,9 @@ class WbComment {
   /// 不另接接口（见 WEIBO_API.md 评论节）。
   final List<WbComment> replies;
 
+  /// 评论配图（至多一张；无图为 null）。字段证据见 [_picFromJson]。
+  final WbPic? pic;
+
   const WbComment({
     required this.id,
     this.user,
@@ -791,6 +794,7 @@ class WbComment {
     this.likeCount = 0,
     this.floorNumber = 0,
     this.replies = const [],
+    this.pic,
   });
 
   factory WbComment.fromJson(Map<String, dynamic> j) {
@@ -807,7 +811,50 @@ class WbComment {
           .map((e) => WbComment.fromJson(_mapOf(e)))
           .where((c) => c.id.isNotEmpty)
           .toList(),
+      pic: _picFromJson(j),
     );
+  }
+
+  /// 评论配图解析（2026-11-12 访客探针实证，帖 5356521951070602 热评）：
+  /// pic_num>0 的评论在 url_struct 的「查看图片」条目里带
+  /// pic_infos{pid: {thumbnail/bmiddle/large/woriginal}}，与帖子
+  /// pic_infos 条目同构（原图档键名是 woriginal 而非 original）。
+  /// 注意：楼中楼回复的 url_struct 会原样继承父评论的图条目
+  /// （pic_num=0 的回复也带着 pic_infos），故必须以评论自身
+  /// pic_num>0 为准入门，不能只看 pic_infos 是否存在。
+  static WbPic? _picFromJson(Map<String, dynamic> j) {
+    if (_intOf(j['pic_num']) <= 0) return null;
+    for (final entry in _listOf(j['url_struct'])) {
+      final infos = _mapOf(_mapOf(entry)['pic_infos']);
+      if (infos.isEmpty) continue;
+      final pid = infos.keys.first;
+      final info = _mapOf(infos[pid]);
+      String u(String k) => httpsUrl(_strOf(_mapOf(info[k])['url']));
+      var w = 0, h = 0;
+      for (final k in [
+        'large',
+        'original',
+        'woriginal',
+        'bmiddle',
+        'thumbnail',
+      ]) {
+        final sizeObj = _mapOf(info[k]);
+        w = _intOf(sizeObj['width']);
+        h = _intOf(sizeObj['height']);
+        if (w > 0 && h > 0) break;
+      }
+      final original = u('original');
+      return WbPic(
+        pid: pid,
+        thumbnail: u('thumbnail'),
+        bmiddle: u('bmiddle'),
+        large: u('large'),
+        original: original.isNotEmpty ? original : u('woriginal'),
+        width: w,
+        height: h,
+      );
+    }
+    return null;
   }
 
   /// 局部更新（删楼中楼回复时换 replies 用，其余字段原样带过）。
@@ -821,6 +868,7 @@ class WbComment {
       likeCount: likeCount,
       floorNumber: floorNumber,
       replies: replies ?? this.replies,
+      pic: pic,
     );
   }
 }

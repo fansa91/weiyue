@@ -8,6 +8,8 @@ import '../services/session_service.dart';
 import '../services/weiyue_service.dart';
 import '../widgets/inline_player.dart';
 import '../widgets/interactions.dart';
+import '../widgets/long_image_viewer.dart';
+import '../widgets/network_image.dart';
 import '../widgets/status_card.dart';
 import '../widgets/user_tile.dart';
 
@@ -679,63 +681,71 @@ class _DetailScreenState extends State<DetailScreen>
     bool isMine(WbComment c) =>
         myUid.isNotEmpty && c.user != null && '${c.user!.id}' == myUid;
     final sorted = _sortedComments();
-    final hasMore = _commentMaxId != 0 && _comments.length < _commentTotal;
-    return ListView(
-      children: [
-        _buildSortBar(cs),
-        if (!loggedIn && _commentTotal > _comments.length)
-          Container(
-            margin: const EdgeInsets.fromLTRB(8, 10, 8, 2),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            decoration: BoxDecoration(
-              color: cs.primaryContainer.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.lock_outline, size: 16, color: cs.primary),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    '访客仅显示热评 · 共 $_commentTotal 条评论，登录后看全部',
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        if (sorted.isEmpty)
-          const Padding(
-            padding: EdgeInsets.all(24),
-            child: Center(child: Text('暂无评论')),
-          ),
-        for (final c in sorted)
-          _CommentTile(
-            comment: c,
-            onReply: (t) => _composeComment(replyTo: t),
-            onDelete: isMine(c) ? () => _deleteComment(c) : null,
-            replyDeleteFor: (r) =>
-                isMine(r) ? () => _deleteComment(r, parent: c) : null,
-          ),
-        if (hasMore)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            child: Center(
-              child: _commentsLoadingMore
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : OutlinedButton(
-                      onPressed: _loadMoreComments,
-                      child: Text(
-                        '加载更多评论（已显示 ${_comments.length} / 共 $_commentTotal 条）',
-                      ),
+    // 评论续拉改由滚动驱动（与单栏外层 _onTabScroll 同一口径：
+    // extentAfter<240 且游标未到底才拉，_loadMoreComments 内部防重入）。
+    // 此前宽屏右栏没有滚动监听、只能点页脚按钮手动翻页，现两栏统一：
+    // 监听直接裹评论列表自身，哪个布局都生效，也不会误伤其他页签。
+    return NotificationListener<ScrollNotification>(
+      onNotification: (n) {
+        if (n is ScrollUpdateNotification && n.metrics.extentAfter < 240) {
+          if (_commentMaxId != 0 && _comments.length < _commentTotal) {
+            _loadMoreComments();
+          }
+        }
+        return false;
+      },
+      child: ListView(
+        children: [
+          _buildSortBar(cs),
+          if (!loggedIn && _commentTotal > _comments.length)
+            Container(
+              margin: const EdgeInsets.fromLTRB(8, 10, 8, 2),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              decoration: BoxDecoration(
+                color: cs.primaryContainer.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.lock_outline, size: 16, color: cs.primary),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      '访客仅显示热评 · 共 $_commentTotal 条评论，登录后看全部',
+                      style: const TextStyle(fontSize: 13),
                     ),
+                  ),
+                ],
+              ),
             ),
-          ),
-      ],
+          if (sorted.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: Text('暂无评论')),
+            ),
+          for (final c in sorted)
+            _CommentTile(
+              comment: c,
+              onReply: (t) => _composeComment(replyTo: t),
+              onDelete: isMine(c) ? () => _deleteComment(c) : null,
+              replyDeleteFor: (r) =>
+                  isMine(r) ? () => _deleteComment(r, parent: c) : null,
+            ),
+          // 页脚只在续拉中出现一支小转圈（滚动自动加载，无手动按钮）；
+          // 到底后无任何提示，保持克制。
+          if (_commentsLoadingMore)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -874,6 +884,10 @@ class _CommentTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 // 与正文共用富文本渲染：话题可点、表情短码渲染成图
                 WbRichText(comment.text, fontSize: 14.5),
+                if (comment.pic != null) ...[
+                  const SizedBox(height: 6),
+                  _CommentPic(pic: comment.pic!),
+                ],
                 const SizedBox(height: 3),
                 Row(
                   children: [
@@ -956,6 +970,38 @@ class _CommentTile extends StatelessWidget {
   }
 }
 
+/// 评论配图缩略（评论/回复共用）：固定 160 方框（比帖子单图克制、
+/// 加载中/失败也不塌陷），点击进普通图库看大图——评论图不做
+/// 长图/实况等特殊形态处理（allowLongImage: false，一律走
+/// PhotoGalleryScreen）。
+class _CommentPic extends StatelessWidget {
+  final WbPic pic;
+
+  const _CommentPic({required this.pic});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      // opaque：不依赖子图加载状态命中——图片未加载完/加载失败时
+      // 也要能点（默认 deferToChild 在图未就绪时会漏掉点按）。
+      behavior: HitTestBehavior.opaque,
+      onTap: () => openPicViewer(context, [pic], 0, allowLongImage: false),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox(
+          width: 160,
+          height: 160,
+          child: NetImage(
+            key: const ValueKey('comment-pic'),
+            url: pic.bestMiddle,
+            fit: BoxFit.cover,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 楼中楼单条回复（评论内嵌 comments 子列表项，缩进小字号）。
 class _ReplyTile extends StatelessWidget {
   final WbComment reply;
@@ -1003,15 +1049,24 @@ class _ReplyTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 1),
                 WbRichText(reply.text, fontSize: 13.5),
+                if (reply.pic != null) ...[
+                  const SizedBox(height: 5),
+                  _CommentPic(pic: reply.pic!),
+                ],
                 const SizedBox(height: 2),
                 Row(
                   children: [
                     Expanded(
                       child: Text(
-                        formatTimeAgo(
-                          parseWbTime(reply.createdAtRaw),
-                          fallback: reply.createdAtRaw,
-                        ),
+                        [
+                          formatTimeAgo(
+                            parseWbTime(reply.createdAtRaw),
+                            fallback: reply.createdAtRaw,
+                          ),
+                          // 地区（属地）：回复对象同样带 source 字段，
+                          // 与顶级评论同口径显示（此前这里漏显示）。
+                          if (reply.source.isNotEmpty) reply.source,
+                        ].join(' · '),
                         style: TextStyle(
                           fontSize: 11.5,
                           color: cs.onSurfaceVariant,
