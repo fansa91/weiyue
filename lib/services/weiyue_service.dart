@@ -2550,6 +2550,54 @@ class WeiyueService {
     );
   }
 
+  // ---------------- 投票 ----------------
+
+  /// 投票/撤票的回执：新投票对象（服务端回的 vote_object），
+  /// 及它自带的 error_msg（主包语义：ok>0 时 error_msg 只弹警告，
+  /// vote_object 照常生效）。vote 解析不到为 null，调用方保留旧态。
+  ({WbVote? vote, String? errorMsg}) _voteReceipt(Map<String, dynamic> json) {
+    final obj = _asMap(json['vote_object']);
+    final err = _firstErrorText([obj['error_msg']]);
+    return (
+      vote: obj.isEmpty ? null : WbVote.tryParse(obj),
+      errorMsg: err.isEmpty ? null : err,
+    );
+  }
+
+  /// 投票：POST /ajax/statuses/setVote（2026-11-12 主包 FeedVote 组件
+  /// setVote 逐字实证：表单 {id: voteObject.id, vote_items: 选项 id
+  /// 数组 toString（逗号拼接）, ext: "4"}；成功 ok>0 且回 vote_object）。
+  /// 单选传一个 id，多选传勾选的全部 id。
+  /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
+  Future<({WbVote? vote, String? errorMsg})> setVote(
+    int voteId,
+    List<int> itemIds,
+  ) async {
+    final json = await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/setVote',
+      form: {
+        'id': voteId,
+        'vote_items': itemIds.join(','),
+        'ext': '4',
+      },
+      referer: 'https://weibo.com/',
+    );
+    return _voteReceipt(json);
+  }
+
+  /// 撤回投票：POST /ajax/statuses/cancelVote（同上组件 cancelVote
+  /// 逐字实证：表单只有 {id}，成功同样回 vote_object）。
+  Future<({WbVote? vote, String? errorMsg})> cancelVote(int voteId) async {
+    final json = await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/cancelVote',
+      form: {'id': voteId},
+      referer: 'https://weibo.com/',
+    );
+    return _voteReceipt(json);
+  }
+
   /// 发评论：POST /ajax/comments/create（文档清单原文），
   /// 参数 id（帖子）+ comment（正文）。成功响应可能是评论对象本体
   /// （顶层或 data 内），能解析出评论就返回，解析不到返回 null

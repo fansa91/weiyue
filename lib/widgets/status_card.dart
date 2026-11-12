@@ -14,6 +14,7 @@ import '../services/download_service.dart';
 import '../services/session_service.dart';
 import '../services/weiyue_service.dart';
 import 'cover_image.dart';
+import 'vote_view.dart';
 import 'download_button.dart';
 import 'interactions.dart';
 import 'long_image_viewer.dart';
@@ -290,6 +291,11 @@ class StatusCard extends StatelessWidget {
             videoOverride ??
                 _VideoCover(status: status, downloadService: downloadService),
           ],
+          // 投票区（card_info.vote_object；投/撤在组件内闭环）
+          if (status.vote != null) ...[
+            const SizedBox(height: 8),
+            VoteView(vote: status.vote!),
+          ],
           const SizedBox(height: 6),
           // 底栏互动区：转发/评论/点赞/收藏（可点，乐观更新，见
           // widgets/interactions.dart 的 StatusActionBar）
@@ -413,6 +419,10 @@ class _RetweetedBlock extends StatelessWidget {
           if (status.hasVideo) ...[
             const SizedBox(height: 6),
             _VideoCover(status: status, downloadService: downloadService),
+          ],
+          if (status.vote != null) ...[
+            const SizedBox(height: 6),
+            VoteView(vote: status.vote!),
           ],
         ],
       ),

@@ -405,6 +405,92 @@ class WbVideo {
       defaultPlayback?.url ?? (fallbackUrl.isNotEmpty ? fallbackUrl : null);
 }
 
+/// 投票的一个选项（主包 FeedVote 组件 vote_list 条目字段实证，2026-11-12）：
+/// id / content / part_num（票数）/ part_ratio（占比 0..1）/ selected（1=本人已选）。
+class WbVoteItem {
+  final int id;
+  final String content;
+  final int partNum;
+  final double partRatio;
+  final bool selected;
+
+  const WbVoteItem({
+    required this.id,
+    this.content = '',
+    this.partNum = 0,
+    this.partRatio = 0,
+    this.selected = false,
+  });
+
+  factory WbVoteItem.fromJson(Map<String, dynamic> j) {
+    final ratio = j['part_ratio'];
+    return WbVoteItem(
+      id: _intOf(j['id']),
+      content: _strOf(j['content']),
+      partNum: _intOf(j['part_num']),
+      partRatio: ratio is num
+          ? ratio.toDouble()
+          : double.tryParse('${ratio ?? ''}') ?? 0,
+      selected: _intOf(j['selected']) == 1,
+    );
+  }
+}
+
+/// 帖子投票（PC 帖子 card_info.vote_object，主包 FeedVote 组件实证）：
+/// parted>0 本人已投；state==0 已结束；is_multi_select==1 多选，
+/// 多选可选区间 [minimum, maximum]；expire_date 为截止秒级时间戳。
+class WbVote {
+  final int id;
+  final List<WbVoteItem> items;
+  final int partInfo; // 总参与人数
+  final bool voted;
+  final bool multiSelect;
+  final bool ended;
+  final int minimum;
+  final int maximum;
+  final DateTime? expireAt;
+  final String userNick;
+
+  const WbVote({
+    required this.id,
+    this.items = const [],
+    this.partInfo = 0,
+    this.voted = false,
+    this.multiSelect = false,
+    this.ended = false,
+    this.minimum = 1,
+    this.maximum = 1,
+    this.expireAt,
+    this.userNick = '',
+  });
+
+  /// 结构不完整（无 id 或无选项）返回 null：普通帖子恒为 null。
+  static WbVote? tryParse(Map<String, dynamic> j) {
+    if (j.isEmpty) return null;
+    final id = _intOf(j['id']);
+    final items = [
+      for (final e in _listOf(j['vote_list'])) WbVoteItem.fromJson(_mapOf(e)),
+    ].where((e) => e.id > 0).toList();
+    if (id <= 0 || items.isEmpty) return null;
+    final expire = _intOf(j['expire_date']);
+    final maxRaw = _intOf(j['maximum']);
+    return WbVote(
+      id: id,
+      items: items,
+      partInfo: _intOf(j['part_info']),
+      voted: _intOf(j['parted']) > 0,
+      multiSelect: _intOf(j['is_multi_select']) == 1,
+      ended: _intOf(j['state']) == 0,
+      minimum: _intOf(j['minimum']) > 0 ? _intOf(j['minimum']) : 1,
+      maximum: maxRaw > 0 ? maxRaw : items.length,
+      expireAt: expire > 0
+          ? DateTime.fromMillisecondsSinceEpoch(expire * 1000)
+          : null,
+      userNick: _strOf(j['user_nick']),
+    );
+  }
+}
+
 class WbStatus {
   final String id;
   final String mblogid; // PC mblogid / m 端 bid
@@ -441,6 +527,9 @@ class WbStatus {
   /// page_info 封面（PC 为字符串、m 端为 {url} 对象），直播兜底封面用。
   final String pagePic;
 
+  /// 帖子投票（card_info.vote_object）；无投票为 null。
+  final WbVote? vote;
+
   const WbStatus({
     required this.id,
     this.mblogid = '',
@@ -463,6 +552,7 @@ class WbStatus {
     this.pageObjectId = '',
     this.isLive = false,
     this.pagePic = '',
+    this.vote,
   });
 
   bool get hasVideo => video != null && video!.hasPlayable;
@@ -482,6 +572,7 @@ class WbStatus {
     int? attitudesCount,
     bool? liked,
     bool? favorited,
+    WbVote? vote,
   }) {
     return WbStatus(
       id: id,
@@ -505,6 +596,7 @@ class WbStatus {
       pageObjectId: pageObjectId,
       isLive: isLive,
       pagePic: pagePic,
+      vote: vote,
     );
   }
 
@@ -702,6 +794,13 @@ class WbStatus {
         final pp = _pagePicOf(pageInfo);
         return pp.isNotEmpty ? pp : _pagePicOf(mediaMap);
       }(),
+      // 投票：主包 FeedVote 从 data.card_info.vote_object 取（逐字实证）；
+      // 顶层 vote_object 仅作防御式兜底。
+      vote: WbVote.tryParse(
+        _mapOf(_mapOf(j['card_info'])['vote_object']).isNotEmpty
+            ? _mapOf(_mapOf(j['card_info'])['vote_object'])
+            : _mapOf(j['vote_object']),
+      ),
     );
   }
 
