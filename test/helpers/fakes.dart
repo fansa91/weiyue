@@ -339,25 +339,25 @@ class FakeWeiyueService extends WeiyueService {
     if (page > 1) return const SearchCategoryPage();
     return switch (category) {
       SearchCategory.users => SearchCategoryPage(
-          users: [makeStatus().user!],
-          total: 1,
-        ),
-      SearchCategory.topic || SearchCategory.supertopic =>
-        const SearchCategoryPage(
-          topics: [
-            WbTopicEntry(
-              title: '#测试话题#',
-              desc1: '测试话题',
-              desc2: '10讨论 100阅读',
-              pic: 'https://example.com/topic.jpg',
-            ),
-          ],
-          total: 1,
-        ),
+        users: [makeStatus().user!],
+        total: 1,
+      ),
+      SearchCategory.topic ||
+      SearchCategory.supertopic => const SearchCategoryPage(
+        topics: [
+          WbTopicEntry(
+            title: '#测试话题#',
+            desc1: '测试话题',
+            desc2: '10讨论 100阅读',
+            pic: 'https://example.com/topic.jpg',
+          ),
+        ],
+        total: 1,
+      ),
       _ => SearchCategoryPage(
-          statuses: [makeStatus(id: 'cat1', text: '分类结果一')],
-          total: 1,
-        ),
+        statuses: [makeStatus(id: 'cat1', text: '分类结果一')],
+        total: 1,
+      ),
     };
   }
 
@@ -517,6 +517,33 @@ class FakeWeiyueService extends WeiyueService {
   @override
   Future<WbUser> getMyProfile(String uid) async =>
       throw const WeiyueException('测试未配置本人资料');
+
+  // ---------------- 发帖/上传 假数据 ----------------
+
+  final List<({String content, List<({String pid, String type})> pics})>
+  publishCalls = [];
+  final List<List<int>> uploadCalls = [];
+  bool failPublish = false;
+  bool failUpload = false;
+  int _uploadSeq = 0;
+
+  @override
+  Future<void> publishStatus(
+    String content, {
+    List<({String pid, String type})> pics = const [],
+  }) async {
+    if (failPublish) throw const WeiyueException('发布失败（假）');
+    publishCalls.add((content: content, pics: pics));
+  }
+
+  @override
+  Future<String> uploadPicture(List<int> bytes) async {
+    uploadCalls.add(bytes);
+    if (failUpload) {
+      throw const WeiyueException('上传图片失败：文件字节数超过限制（-10）');
+    }
+    return 'FAKE_PID_${++_uploadSeq}';
+  }
 
   @override
   Future<({List<WbUser> users, int total})> getMyFollowing(
