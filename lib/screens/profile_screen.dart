@@ -40,6 +40,10 @@ class _ProfileScreenState extends State<ProfileScreen>
   bool _following = false;
   bool _followBusy = false;
 
+  /// 已屏蔽/拉黑（本页内经 filterUser 成功后置位）：关注按钮让位
+  /// 给「已拉黑」禁用态；解除屏蔽走网页端设置页，App 内不做。
+  bool _blocked = false;
+
   @override
   void initState() {
     super.initState();
@@ -110,6 +114,93 @@ class _ProfileScreenState extends State<ProfileScreen>
         ..showSnackBar(SnackBar(content: Text('$e')));
     } finally {
       if (mounted) setState(() => _followBusy = false);
+    }
+  }
+
+  /// 屏蔽/拉黑确认框（主包同名对话框口径）：三个范围开关默认全开，
+  /// 「设置对@昵称 的屏蔽范围，全选即为拉黑用户」；确认走
+  /// filterUser，成功后本地置已拉黑态并清关注态（主包成功后同置
+  /// block=true），提示「已拉黑」（全开）或「已屏蔽」。
+  Future<void> _showBlockDialog(WbUser user) async {
+    var blockStatuses = true;
+    var blockInteract = true;
+    var blockFollow = true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('屏蔽用户'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('设置对 @${user.screenName} 的屏蔽范围，全选即为拉黑用户'),
+              const SizedBox(height: 8),
+              CheckboxListTile(
+                value: blockStatuses,
+                onChanged: (v) =>
+                    setDialogState(() => blockStatuses = v ?? false),
+                title: const Text('不看TA的微博'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+              CheckboxListTile(
+                value: blockInteract,
+                onChanged: (v) =>
+                    setDialogState(() => blockInteract = v ?? false),
+                title: const Text('禁止TA与我互动'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+              CheckboxListTile(
+                value: blockFollow,
+                onChanged: (v) =>
+                    setDialogState(() => blockFollow = v ?? false),
+                title: const Text('禁止TA关注我'),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('确定'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final all = blockStatuses && blockInteract && blockFollow;
+    try {
+      await context.read<WeiyueService>().filterUser(
+        uid: '${user.id}',
+        screenName: user.screenName,
+        blockStatuses: blockStatuses,
+        blockInteract: blockInteract,
+        blockFollow: blockFollow,
+      );
+      if (!mounted) return;
+      setState(() {
+        _blocked = true;
+        _following = false;
+      });
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(all ? '已拉黑' : '已屏蔽')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
@@ -191,7 +282,24 @@ class _ProfileScreenState extends State<ProfileScreen>
     final session = context.watch<SessionService>();
     final isSelf = session.uid.isNotEmpty && session.uid == widget.uid;
     return Scaffold(
-      appBar: AppBar(title: Text(user?.screenName ?? '用户主页')),
+      appBar: AppBar(
+        title: Text(user?.screenName ?? '用户主页'),
+        actions: [
+          // 更多菜单（仅看他人主页且已登录时）：屏蔽/拉黑。
+          // 举报在主包里是跳网页表单（service.account.weibo.com
+          // /reportspam），没有 ajax 接口，不在此凑数。
+          if (!isSelf && user != null && session.isLoggedIn)
+            PopupMenuButton<String>(
+              tooltip: '更多',
+              onSelected: (v) {
+                if (v == 'block') _showBlockDialog(user);
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'block', child: Text('屏蔽/拉黑')),
+              ],
+            ),
+        ],
+      ),
       body: _error != null && user == null
           ? Center(child: Text(_error!))
           : NestedScrollView(
@@ -370,7 +478,13 @@ class _ProfileScreenState extends State<ProfileScreen>
                         ],
                         const Spacer(),
                         if (!isSelf) ...[
-                          if (_following)
+                          if (_blocked)
+                            OutlinedButton(
+                              onPressed: null,
+                              style: _followBtnStyle,
+                              child: const Text('已拉黑'),
+                            )
+                          else if (_following)
                             OutlinedButton(
                               onPressed: _followBusy ? null : _toggleFollow,
                               style: _followBtnStyle,

@@ -435,6 +435,83 @@ class FakeWeiyueService extends WeiyueService {
     total: 1,
   );
 
+  // ---------------- 赞/评论赞/分组/屏蔽 假数据 ----------------
+
+  /// 我赞过的：cursor=0 给两条（一条已赞态），之后到底。
+  @override
+  Future<({List<WbStatus> items, int nextCursor})> getLikeList(
+    String uid, {
+    int cursor = 0,
+  }) async => (
+    items: cursor == 0
+        ? [
+            makeStatus(id: 'lk-s1', text: '我赞过的帖子一'),
+            makeStatus(id: 'lk-s2', text: '我赞过的帖子二'),
+          ]
+        : const <WbStatus>[],
+    nextCursor: -1,
+  );
+
+  final List<String> likedCommentIds = [];
+  final List<String> unlikedCommentIds = [];
+  bool failCommentLike = false;
+
+  @override
+  Future<void> likeComment(String commentId) async {
+    if (failCommentLike) throw const WeiyueException('点赞失败（假）');
+    likedCommentIds.add(commentId);
+  }
+
+  @override
+  Future<void> unlikeComment(String commentId) async {
+    if (failCommentLike) throw const WeiyueException('取消赞失败（假）');
+    unlikedCommentIds.add(commentId);
+  }
+
+  /// 关注分组（默认空：首页不出现分组频道；分组测试自行赋值）。
+  List<WbFollowGroup> followGroups = const [];
+  final List<String> groupTimelineGids = [];
+
+  @override
+  Future<List<WbFollowGroup>> getFollowGroups() async => followGroups;
+
+  @override
+  Future<({List<WbStatus> statuses, String maxId, String sinceId})>
+  getGroupTimeline({
+    required String gid,
+    String maxId = '',
+    String sinceId = '',
+    int count = 20,
+  }) async {
+    groupTimelineGids.add(gid);
+    return maxId.isEmpty
+        ? (
+            statuses: [makeStatus(id: 'g1', text: '分组流帖子一')],
+            maxId: 'gm1',
+            sinceId: 'gs1',
+          )
+        : (statuses: const <WbStatus>[], maxId: maxId, sinceId: sinceId);
+  }
+
+  final List<({String uid, bool statuses, bool interact, bool follow})>
+  filterUserCalls = [];
+
+  @override
+  Future<void> filterUser({
+    required String uid,
+    String screenName = '',
+    bool blockStatuses = true,
+    bool blockInteract = true,
+    bool blockFollow = true,
+  }) async {
+    filterUserCalls.add((
+      uid: uid,
+      statuses: blockStatuses,
+      interact: blockInteract,
+      follow: blockFollow,
+    ));
+  }
+
   /// 默认未配置：抛错让「我的」页保持简版账号卡（需要资料头的测试
   /// 用子类覆盖返回完整资料）。
   @override

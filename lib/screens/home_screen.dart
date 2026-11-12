@@ -7,6 +7,7 @@ import '../models/models.dart';
 import '../services/session_service.dart';
 import '../services/weiyue_service.dart';
 import '../widgets/friends_feed_view.dart';
+import '../widgets/group_feed_view.dart';
 import '../widgets/hot_feed_view.dart';
 
 /// 「关注」频道哨兵（登录后出现在频道行最前）：gid 用本地保留值，
@@ -16,6 +17,11 @@ const friendsChannel = WbChannel(
   title: '关注',
   containerid: '10001',
 );
+
+/// 关注分组频道的 containerid 哨兵：分组频道复用 WbChannel 承载
+/// （gid=分组 gid、title=组名），feed 按此标记分发到 GroupFeedView
+/// （数据走分组时间线接口，不经 hottimeline）。
+const groupChannelContainerId = 'weiyue_group';
 
 /// 首页：热门推荐 + 子分类 chips（allGroups「我的频道」）；
 /// 登录后最前面多一个「关注」频道（关注流）。
@@ -28,6 +34,12 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<WbChannel> _channels = const [];
+
+  /// 关注分组频道（登录后追加在热门频道之后）：选中即一个保活
+  /// 频道，与热门分类同机制（IndexedStack + _visited 懒创建）。
+  List<WbChannel> _groupChannels = const [];
+  String _groupsLoadedForUid = '';
+  SessionService? _session;
   WbChannel? _selected;
   bool _loadingChannels = true;
 
@@ -40,16 +52,70 @@ class _HomeScreenState extends State<HomeScreen> {
   /// refresh）：与频道一一对应，随保活的 IndexedStack 一起常驻。
   final Map<String, GlobalKey<HotFeedViewState>> _feedKeys = {};
   final GlobalKey<FriendsFeedViewState> _friendsFeedKey = GlobalKey();
+  final Map<String, GlobalKey<GroupFeedViewState>> _groupFeedKeys = {};
 
   static String _keyOf(WbChannel ch) => '${ch.gid}_${ch.containerid}';
 
   GlobalKey<HotFeedViewState> _feedKeyOf(WbChannel ch) =>
       _feedKeys.putIfAbsent(_keyOf(ch), () => GlobalKey<HotFeedViewState>());
 
+  GlobalKey<GroupFeedViewState> _groupFeedKeyOf(WbChannel ch) =>
+      _groupFeedKeys.putIfAbsent(
+        _keyOf(ch),
+        () => GlobalKey<GroupFeedViewState>(),
+      );
+
+  /// 完整频道行：关注（登录时）+ 热门分类 + 关注分组（登录时）。
+  List<WbChannel> _allChannels(bool loggedIn) => [
+    if (loggedIn) friendsChannel,
+    ..._channels,
+    if (loggedIn) ..._groupChannels,
+  ];
+
   @override
   void initState() {
     super.initState();
+    _session = context.read<SessionService>();
+    _session!.addListener(_onSessionChanged);
     _loadChannels();
+    if (_session!.isLoggedIn) _loadGroups();
+  }
+
+  @override
+  void dispose() {
+    _session?.removeListener(_onSessionChanged);
+    super.dispose();
+  }
+
+  /// 登录态变化（页面打开后才登录/换号）时补拉分组；同一 uid
+  /// 只拉一次，退出登录后频道行由 build 的 loggedIn 门控隐藏。
+  void _onSessionChanged() {
+    final s = _session;
+    if (s == null || !s.isLoggedIn) return;
+    if (_groupsLoadedForUid != s.uid) _loadGroups();
+  }
+
+  Future<void> _loadGroups() async {
+    final uid = _session?.uid ?? '';
+    _groupsLoadedForUid = uid;
+    try {
+      final groups = await context.read<WeiyueService>().getFollowGroups();
+      if (!mounted) return;
+      setState(() {
+        _groupChannels = [
+          for (final g in groups)
+            WbChannel(
+              gid: g.gid,
+              title: g.title,
+              containerid: groupChannelContainerId,
+            ),
+        ];
+      });
+    } catch (_) {
+      // 分组拉取失败不影响首页：入口不出现即可（服务层已有缓存，
+      // 下次登录态变化可再试）。
+      if (mounted) setState(() => _groupChannels = const []);
+    }
   }
 
   Future<void> _loadChannels() async {
@@ -70,6 +136,12 @@ class _HomeScreenState extends State<HomeScreen> {
     if (ch.gid == friendsChannel.gid) {
       return FriendsFeedView(key: _friendsFeedKey);
     }
+    if (ch.containerid == groupChannelContainerId) {
+      return GroupFeedView(
+        key: _groupFeedKeyOf(ch),
+        group: WbFollowGroup(gid: ch.gid, title: ch.title),
+      );
+    }
     return HotFeedView(
       key: _feedKeyOf(ch),
       channel: ch,
@@ -81,12 +153,17 @@ class _HomeScreenState extends State<HomeScreen> {
   /// _loadFirst 路径），其余频道的保活缓存不受影响。
   void _refreshCurrent() {
     final loggedIn = context.read<SessionService>().isLoggedIn;
-    final channels = [if (loggedIn) friendsChannel, ..._channels];
+    final channels = _allChannels(loggedIn);
     if (channels.isEmpty) return;
     final selected = _effectiveSelected(channels);
-    final future = selected.gid == friendsChannel.gid
-        ? _friendsFeedKey.currentState?.refresh()
-        : _feedKeys[_keyOf(selected)]?.currentState?.refresh();
+    final Future<void>? future;
+    if (selected.gid == friendsChannel.gid) {
+      future = _friendsFeedKey.currentState?.refresh();
+    } else if (selected.containerid == groupChannelContainerId) {
+      future = _groupFeedKeys[_keyOf(selected)]?.currentState?.refresh();
+    } else {
+      future = _feedKeys[_keyOf(selected)]?.currentState?.refresh();
+    }
     if (future != null) unawaited(future);
   }
 
@@ -107,7 +184,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final loggedIn = context.watch<SessionService>().isLoggedIn;
-    final channels = [if (loggedIn) friendsChannel, ..._channels];
+    final channels = _allChannels(loggedIn);
     final selected = channels.isEmpty ? null : _effectiveSelected(channels);
     final selectedIndex = selected == null
         ? -1

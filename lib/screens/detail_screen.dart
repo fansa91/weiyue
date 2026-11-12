@@ -860,25 +860,8 @@ class _CommentTile extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
-                    if (comment.likeCount > 0)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.favorite_border,
-                            size: 14,
-                            color: cs.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 3),
-                          Text(
-                            formatPlayCount(comment.likeCount),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: cs.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
+                    // 评论点赞（可点的乐观按钮，替代原静态计数展示）。
+                    CommentLikeButton(comment: comment),
                   ],
                 ),
                 const SizedBox(height: 2),
@@ -1073,6 +1056,7 @@ class _ReplyTile extends StatelessWidget {
                         ),
                       ),
                     ),
+                    CommentLikeButton(comment: reply),
                     if (onReply != null)
                       InkWell(
                         borderRadius: BorderRadius.circular(4),

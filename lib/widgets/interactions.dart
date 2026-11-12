@@ -357,3 +357,100 @@ class _ActionButton extends StatelessWidget {
     );
   }
 }
+
+/// 评论点赞按钮（顶级评论与楼中楼共用）：心形图标 + 计数，
+/// 与帖子点赞同一口径——乐观更新先行、失败回滚并提示。
+/// 状态字段来自评论对象的 liked/like_counts（主包实证）；
+/// 访客态点按先走 ensureLoggedIn 守卫，不发请求。
+class CommentLikeButton extends StatefulWidget {
+  final WbComment comment;
+
+  const CommentLikeButton({super.key, required this.comment});
+
+  @override
+  State<CommentLikeButton> createState() => _CommentLikeButtonState();
+}
+
+class _CommentLikeButtonState extends State<CommentLikeButton> {
+  late bool _liked;
+  late int _count;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _liked = widget.comment.liked;
+    _count = widget.comment.likeCount;
+  }
+
+  @override
+  void didUpdateWidget(CommentLikeButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 与 StatusActionBar 同口径：收到新的评论对象（如刷新一页）
+    // 就采纳服务端基线，本地乐观值不跨对象残留。
+    if (oldWidget.comment.id != widget.comment.id ||
+        oldWidget.comment.liked != widget.comment.liked ||
+        oldWidget.comment.likeCount != widget.comment.likeCount) {
+      _liked = widget.comment.liked;
+      _count = widget.comment.likeCount;
+    }
+  }
+
+  Future<void> _toggle() async {
+    if (_busy) return;
+    if (!ensureLoggedIn(context)) return;
+    final svc = context.read<WeiyueService>();
+    final target = !_liked;
+    setState(() {
+      _busy = true;
+      _liked = target;
+      _count = (_count + (target ? 1 : -1)).clamp(0, 1 << 31);
+    });
+    try {
+      if (target) {
+        await svc.likeComment(widget.comment.id);
+      } else {
+        await svc.unlikeComment(widget.comment.id);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _liked = !target;
+        _count = (_count + (target ? -1 : 1)).clamp(0, 1 << 31);
+      });
+      _snack(context, '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final color = _liked ? const Color(0xFFE6162D) : cs.onSurfaceVariant;
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: _toggle,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              _liked ? Icons.favorite : Icons.favorite_border,
+              size: 15,
+              color: color,
+            ),
+            if (_count > 0) ...[
+              const SizedBox(width: 3),
+              Text(
+                formatPlayCount(_count),
+                style: TextStyle(fontSize: 12, color: color),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}

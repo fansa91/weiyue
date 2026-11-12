@@ -8,6 +8,7 @@ import '../services/visitor_service.dart';
 import '../services/weiyue_service.dart';
 import '../widgets/network_image.dart';
 import 'favorites_screen.dart';
+import 'likes_screen.dart';
 import 'following_screen.dart';
 import 'login_screen.dart';
 import 'message_center_screen.dart';
@@ -243,6 +244,17 @@ class _MeScreenState extends State<MeScreen> {
                 MaterialPageRoute(
                   builder: (_) =>
                       const DetailScaffold(child: FavoritesScreen()),
+                ),
+              ),
+            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            ListTile(
+              leading: const Icon(Icons.favorite_border),
+              title: const Text('我赞过的'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const DetailScaffold(child: LikesScreen()),
                 ),
               ),
             ),
