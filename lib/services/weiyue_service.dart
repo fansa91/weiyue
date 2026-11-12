@@ -497,6 +497,45 @@ class WeiyueService {
     return gids;
   }
 
+  /// 关注分组缓存（分组流入口用，含组名）：同 [_followGroupGids]
+  /// 的取舍规则（group_type==0 段、条目 type!=8888），会话内成功
+  /// 拉到一次即缓存；失败/为空不缓存，下次可重试。
+  List<WbFollowGroup>? _followGroupsCache;
+
+  /// 关注分组列表（首页分组流入口）：allGroups 关注分组段的条目，
+  /// 每条 {gid, title}。其中「全部关注」（gid 前缀 10001）与首页
+  /// 既有「关注」频道同源（friendstimeline list_id=10001），
+  /// 不重复列出。未登录/无分组/拉取失败都返回空列表（入口不出现）。
+  Future<List<WbFollowGroup>> getFollowGroups() async {
+    final cached = _followGroupsCache;
+    if (cached != null) return cached;
+    final json = await _get(
+      WbStack.pc,
+      '$_pcBase/ajax/feed/allGroups',
+      query: {'is_new_segment': 1, 'fetch_hot': 1},
+    );
+    final groups = <WbFollowGroup>[];
+    final seen = <String>{};
+    for (final seg in _asList(json['groups'])) {
+      final sm = _asMap(seg);
+      final gt = sm['group_type'];
+      if (gt != null && _intOf(gt) != 0) continue; // 频道段整段跳过
+      for (final item in _asList(sm['group'])) {
+        final im = _asMap(item);
+        if ('${im['type'] ?? ''}' == '8888') continue; // 频道条目双保险
+        final gid = '${im['gid'] ?? ''}'.trim();
+        if (gid.isEmpty || gid == 'null' || !seen.add(gid)) continue;
+        if (gid.startsWith('10001')) continue; // 全部关注：与关注频道同源
+        final title = '${im['title'] ?? ''}'.trim();
+        groups.add(
+          WbFollowGroup(gid: gid, title: title.isEmpty ? '分组' : title),
+        );
+      }
+    }
+    if (groups.isNotEmpty) _followGroupsCache = groups;
+    return groups;
+  }
+
   /// 按名找分类（视频页签用）：先查缓存/接口结果，再查内置表。
   Future<WbChannel?> channelByTitle(String title) async {
     final all = await getChannels();
@@ -1502,6 +1541,73 @@ class WeiyueService {
     return (statuses: statuses, sinceId: sid);
   }
 
+  /// 分组时间线（登录后可用）：单个关注分组的微博流。
+  /// 路径与参数为 2026-11-12 主包调用点实证（formatGroup 选 api +
+  /// 时间线加载器拼参）：gid 前缀 ∈ {11000,11001,11002}（最新微博等
+  /// 系统分组）走 /ajax/feed/friendstimeline，参数
+  /// {list_id, refresh:4, since_id, max_id, count, fid: gid}；
+  /// 其余自定义分组走 /ajax/feed/groupstimeline，参数
+  /// {list_id, refresh:4, max_id, fast_refresh:1, count}（无 since_id）。
+  /// 响应与 friendstimeline 同形态（statuses + max_id_str/since_id
+  /// 双游标），解析口径与 [getFriendsTimeline] 一致，游标原样回传。
+  Future<({List<WbStatus> statuses, String maxId, String sinceId})>
+  getGroupTimeline({
+    required String gid,
+    String maxId = '',
+    String sinceId = '',
+    int count = 20,
+  }) async {
+    final prefix = gid.length >= 5 ? gid.substring(0, 5) : gid;
+    final friendsFamily = const {
+      '11000',
+      '11001',
+      '11002',
+    }.contains(prefix);
+    final json = await _get(
+      WbStack.pc,
+      friendsFamily
+          ? '$_pcBase/ajax/feed/friendstimeline'
+          : '$_pcBase/ajax/feed/groupstimeline',
+      query: friendsFamily
+          ? {
+              'list_id': gid,
+              'refresh': 4,
+              'since_id': sinceId,
+              'max_id': maxId,
+              'count': count,
+              'fid': gid,
+            }
+          : {
+              'list_id': gid,
+              'refresh': 4,
+              'max_id': maxId,
+              'fast_refresh': 1,
+              'count': count,
+            },
+      referer: 'https://weibo.com/',
+    );
+    final data = _asMap(json['data']);
+    var raw = _asList(json['statuses']);
+    if (raw.isEmpty) raw = _asList(data['list']);
+    if (raw.isEmpty) raw = _asList(data['statuses']);
+    final statuses = raw
+        .map((e) => WbStatus.fromJson(_asMap(e)))
+        .where((s) => s.id.isNotEmpty)
+        .toList();
+    String cursorOf(dynamic v) {
+      final s = '${v ?? ''}'.trim();
+      return (s.isEmpty || s == 'null') ? '' : s;
+    }
+
+    return (
+      statuses: statuses,
+      maxId: cursorOf(
+        json['max_id_str'] ?? data['max_id_str'] ?? json['max_id'],
+      ),
+      sinceId: cursorOf(json['since_id'] ?? data['since_id']),
+    );
+  }
+
   /// 转发列表（登录后可用）：/ajax/statuses/repostTimeline。
   /// 访客固定回 `{data: [], total_number: 0, empty_tip: "…请登录后使用"}`；
   /// 登录态 data 为帖子对象数组，page/max_page 分页（文档结构）。
@@ -1578,6 +1684,64 @@ class WeiyueService {
       return (items: items, total: total > 0 ? total : items.length);
     } catch (e) {
       session.recordLoginFailure('/ajax/favorites/all_fav', '$e');
+      rethrow;
+    }
+  }
+
+  /// 我赞过的（登录后可用）：GET /ajax/profile/getLikeList
+  /// （2026-11-12 主包主页瀑布流调用点实证：pageType=like 时
+  /// $http.get(getLikeList, {params:{uid, cursor}})），响应
+  /// {ok, data:{list:[帖子对象], next_cursor, attitude_privacy,
+  /// is_owner}}，cursor 从 0 起、next_cursor=-1 表示到底。
+  /// 条目就是完整帖子对象（与瀑布流同解析，含 mix_media_info，
+  /// WbStatus.fromJson 已覆盖）。uid 为空直接抛错（同 getMyFollowing：
+  /// 空参必 400，不发请求）。服务端带错误信息回空时抛给页面展示。
+  /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
+  Future<({List<WbStatus> items, int nextCursor})> getLikeList(
+    String uid, {
+    int cursor = 0,
+  }) async {
+    if (uid.trim().isEmpty) {
+      throw const WeiyueException('缺少用户 ID，请先点「修复登录态」或重新检测');
+    }
+    try {
+      final json = await _get(
+        WbStack.pc,
+        '$_pcBase/ajax/profile/getLikeList',
+        query: {'uid': uid, 'cursor': cursor},
+        referer: 'https://weibo.com/u/$uid',
+      );
+      final data = _asMap(json['data']);
+      var raw = _asList(data['list']);
+      if (raw.isEmpty) raw = _asList(json['data']);
+      if (raw.isEmpty) raw = _asList(data['statuses']);
+      final items = raw
+          .map((e) => WbStatus.fromJson(_asMap(e)))
+          .where((s) => s.id.isNotEmpty)
+          .toList();
+      if (items.isEmpty) {
+        final msg = _firstErrorText([
+          json['msg'],
+          json['error'],
+          data['msg'],
+          data['error'],
+        ]);
+        final okVal = json['ok'];
+        if (okVal == 0 || okVal == '0' || msg.isNotEmpty) {
+          throw WeiyueException(msg.isNotEmpty ? msg : '赞列表接口返回错误（ok=0）');
+        }
+      }
+      final nextRaw = data['next_cursor'] ?? json['next_cursor'];
+      return (
+        items: items,
+        nextCursor: nextRaw == null
+            ? -1
+            : (nextRaw is num
+                  ? nextRaw.toInt()
+                  : int.tryParse('$nextRaw') ?? -1),
+      );
+    } catch (e) {
+      session.recordLoginFailure('/ajax/profile/getLikeList', '$e');
       rethrow;
     }
   }
@@ -1892,6 +2056,17 @@ class WeiyueService {
   /// 分类键名（mention_status/all_mention_cmt/cmt/attitude）为主包
   /// 未读状态表实证，其数值在主包里来自独立的 remind 接口——
   /// 期待它出现在 unreadHint/summary 响应里属推测防御，取不到即全零。
+  ///
+  /// 2026-11-12 起接入分类未读的真实来源（主包顶栏调用点实证）：
+  /// jsonp GET https://rm.api.weibo.com/2/remind/push_count.json
+  /// （参数与主包逐字一致，含 source=339644097），响应
+  /// {code:1, data:{mention_status, all_mention_cmt, cmt, attitude,
+  /// dm_total, chat_group_client, dm_pub_total, remind_settings…}}，
+  /// 主包 calcMessageBadge/calcChatProUnread 即消费此 data。
+  /// 本方法在既有两路吸收之后最后吸收 push_count（absorb 对正值
+  /// 覆盖写，故 push_count 对同名键优先）；它失败/code!=1/无会话时
+  /// 静默跳过，徽标完全回退既有逻辑，不记登录失败。
+  /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
   Future<MessageUnread> getMessageSummary() async {
     final merged = <String, int>{};
     void absorb(Map<String, dynamic> m) {
@@ -1941,6 +2116,10 @@ class WeiyueService {
     } catch (e) {
       session.recordLoginFailure('/ajax/message/summary', '$e');
     }
+    // 真实未读来源 push_count 最后吸收（同名键以它为准）；
+    // 静默失败：拿不到就用上面两路的防御结果，徽标不消失。
+    final pushData = await _pushCountData();
+    if (pushData != null) absorb(pushData);
     int pick(List<String> keys) {
       for (final k in keys) {
         final v = merged[k];
@@ -1957,6 +2136,61 @@ class WeiyueService {
       directMessages: pick(['dm_total', 'dm']),
       serverTotal: pick(['messages', 'total']),
     );
+  }
+
+  /// push_count 未读数据（rm.api.weibo.com 跨域 JSONP，主包顶栏
+  /// 调用点实证，2026-11-12）：参数与主包逐字一致。只许登录态
+  /// （sessionOnly：不回退访客、不触发过期标记）；响应可能是
+  /// 纯 JSON 或 `callback({...})` 包裹，两种都解。code==1 才认
+  /// data；任何失败/异常都返回 null（调用方静默回退，不记诊断）。
+  Future<Map<String, dynamic>?> _pushCountData() async {
+    if (!session.hasUsableCookie(WbStack.pc)) return null;
+    try {
+      final body = await _getRaw(
+        WbStack.pc,
+        'https://rm.api.weibo.com/2/remind/push_count.json',
+        query: const {
+          'trim_null': 1,
+          'with_dm_group': 1,
+          'with_reminding': 1,
+          'with_settings': 1,
+          'exclude_attitude': 1,
+          'with_chat_group_notice': 1,
+          'source': 339644097,
+          'with_chat_group': 1,
+          'with_dm_unread': 1,
+        },
+        referer: 'https://weibo.com/',
+        sessionOnly: true,
+      );
+      final json = _decodeJsonpLoose(body);
+      if (json == null) return null;
+      final code = json['code'];
+      if (code != 1 && code != '1') return null;
+      final data = _asMap(json['data']);
+      return data.isEmpty ? null : data;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 宽容 JSONP 解码：纯 JSON 直接解；`name({...})` / `({...})`
+  /// 包裹时剥壳再解；解不出返回 null（不抛错，与 _decodeJsonp 的
+  /// 报错口径区分：push_count 是可有可无的增强来源）。
+  static Map<String, dynamic>? _decodeJsonpLoose(String body) {
+    var t = body.trim();
+    if (!t.startsWith('{')) {
+      final open = t.indexOf('(');
+      final close = t.lastIndexOf(')');
+      if (open < 0 || close <= open) return null;
+      t = t.substring(open + 1, close).trim();
+    }
+    try {
+      final d = jsonDecode(t);
+      return d is Map ? _asMap(d) : null;
+    } on FormatException {
+      return null;
+    }
   }
 
   // ---------------- 互动写操作（登录态） ----------------
@@ -2075,6 +2309,30 @@ class WeiyueService {
     );
   }
 
+  /// 评论点赞：POST /ajax/statuses/updateLike（2026-11-12 主包
+  /// 评论组件点赞动作实证：likeType=comment 时 body 为
+  /// {object_id: 评论 idstr, object_type: "comment"}，评论的已赞
+  /// 状态由其对象上的 liked/like_counts 字段表达）。
+  Future<void> likeComment(String commentId) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/updateLike',
+      form: {'object_id': commentId, 'object_type': 'comment'},
+      referer: 'https://weibo.com/',
+    );
+  }
+
+  /// 评论取消赞：POST /ajax/statuses/destroyLike（同上，同一
+  /// object_id/object_type 表单）。
+  Future<void> unlikeComment(String commentId) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/destroyLike',
+      form: {'object_id': commentId, 'object_type': 'comment'},
+      referer: 'https://weibo.com/',
+    );
+  }
+
   /// 发评论：POST /ajax/comments/create（文档清单原文），
   /// 参数 id（帖子）+ comment（正文）。成功响应可能是评论对象本体
   /// （顶层或 data 内），能解析出评论就返回，解析不到返回 null
@@ -2190,6 +2448,35 @@ class WeiyueService {
       WbStack.pc,
       '$_pcBase/ajax/statuses/destroyComment',
       form: {'cid': cid},
+    );
+  }
+
+  /// 屏蔽/拉黑用户：POST /ajax/statuses/filterUser（2026-11-12
+  /// 主包六处调用点实证，参数逐字：{uid, status, interact, follow}
+  /// 三个 0/1 开关，个别调用点另带 screen_name）。主包对话框口径：
+  /// 「设置对@昵称 的屏蔽范围，全选即为拉黑用户」——status=不看TA
+  /// 的微博、interact=禁止TA与我互动、follow=禁止TA关注我，
+  /// 三项默认全开；成功（ok>0）后主包提示「已拉黑」（全开时）或
+  /// 「已屏蔽」并置本地 block=true。本方法不做取消屏蔽（主包解除
+  /// 走设置页列表批量接口，形态不同，未实证到单用户解除调用）。
+  Future<void> filterUser({
+    required String uid,
+    String screenName = '',
+    bool blockStatuses = true,
+    bool blockInteract = true,
+    bool blockFollow = true,
+  }) async {
+    await _post(
+      WbStack.pc,
+      '$_pcBase/ajax/statuses/filterUser',
+      form: {
+        'uid': uid,
+        if (screenName.isNotEmpty) 'screen_name': screenName,
+        'status': blockStatuses ? 1 : 0,
+        'interact': blockInteract ? 1 : 0,
+        'follow': blockFollow ? 1 : 0,
+      },
+      referer: 'https://weibo.com/u/$uid',
     );
   }
 

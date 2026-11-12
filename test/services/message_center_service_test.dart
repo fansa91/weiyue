@@ -283,11 +283,15 @@ void main() {
     // 带参后解析结果与分类键用例一致，不回退
     expect(u.total, 11);
 
-    // 请求先后：allGroups → unreadHint → summary
+    // 请求先后：allGroups → unreadHint → summary → push_count
+    // （push_count 2026-11-12 接入：真实未读来源，最后尝试；
+    // 本用例 adapter 对它回 summary 夹具、无 code 字段被忽略，
+    // 上面的分类数值仍全部来自 unreadHint）
     expect(adapter.requests.map((r) => r.uri.path).toList(), [
       '/ajax/feed/allGroups',
       '/ajax/message/unreadHint',
       '/ajax/message/summary',
+      '/2/remind/push_count.json',
     ]);
     // group_ids 只含关注分组段（group_type=0）的 gid，频道段
     // （group_type=1 / type=8888）的 102803 等不混入
@@ -318,11 +322,13 @@ void main() {
     final svc = await _svc(adapter, session: session);
 
     final u = await svc.getMessageSummary();
-    // summary 只有互动量形态：分类全零；unreadHint 根本没被调用
+    // summary 只有互动量形态：分类全零；unreadHint 根本没被调用；
+    // push_count 照常尝试（adapter 对它回 summary 夹具、无 code 被忽略）
     expect(u.total, 0);
     expect(adapter.requests.map((r) => r.uri.path).toList(), [
       '/ajax/feed/allGroups',
       '/ajax/message/summary',
+      '/2/remind/push_count.json',
     ]);
     // 跳过 unreadHint 不记失败，分组拉取失败也不记
     expect(session.recentLoginFailures, isEmpty);
@@ -454,6 +460,97 @@ void main() {
         'HTML',
       );
       expect(WeiyueService.bodyFingerprint('   '), '空正文');
+    });
+  });
+
+  group('未读汇总：push_count 真实来源（2026-11-12 接入）', () {
+    test('code=1 的分类计数生效且优先于 unreadHint 同名键', () async {
+      final adapter = FakeAdapter((opt) async {
+        if (opt.uri.path.endsWith('push_count.json')) {
+          return ResponseBody.fromString(
+            _fixture('message_push_count.json'),
+            200,
+            headers: {
+              Headers.contentTypeHeader: ['application/json; charset=utf-8'],
+            },
+          );
+        }
+        if (opt.uri.path.endsWith('allGroups')) {
+          return jsonBody(_fixture('message_all_groups.json'));
+        }
+        if (opt.uri.path.endsWith('unreadHint')) {
+          return jsonBody(_fixture('message_unread_hint.json'));
+        }
+        return jsonBody(_fixture('message_summary.json'));
+      });
+      final svc = await _svc(adapter);
+
+      final u = await svc.getMessageSummary();
+      // push_count 夹具：mention_status=7 / all_mention_cmt=2 /
+      // cmt=1 / attitude=9 / dm_total=3，覆盖 unreadHint 的同名键
+      expect(u.mentionStatuses, 7);
+      expect(u.mentionComments, 2);
+      expect(u.mentions, 9);
+      expect(u.commentsToMe, 1);
+      expect(u.likesToMe, 9);
+      expect(u.directMessages, 3);
+      // total = 分类求和（categoriesSum 含私信类）：7+2+1+9+3
+      expect(u.total, 22);
+      // 请求打到 rm.api.weibo.com 且带主包同款参数
+      final pushReq = adapter.requests.firstWhere(
+        (r) => r.uri.path.endsWith('push_count.json'),
+      );
+      expect(pushReq.uri.host, 'rm.api.weibo.com');
+      expect(pushReq.queryParameters['source'], 339644097);
+      expect(pushReq.queryParameters['with_dm_unread'], 1);
+    });
+
+    test('JSONP 包裹形态同样可解', () async {
+      final adapter = FakeAdapter((opt) async {
+        if (opt.uri.path.endsWith('push_count.json')) {
+          return ResponseBody.fromString(
+            'STK_123456(${_fixture('message_push_count.json')})',
+            200,
+            headers: {
+              Headers.contentTypeHeader: ['text/plain; charset=utf-8'],
+            },
+          );
+        }
+        if (opt.uri.path.endsWith('allGroups')) {
+          return jsonBody({'ok': 1});
+        }
+        return jsonBody({'ok': 1});
+      });
+      final svc = await _svc(adapter);
+
+      final u = await svc.getMessageSummary();
+      expect(u.mentionStatuses, 7);
+      expect(u.likesToMe, 9);
+      expect(u.total, 22);
+    });
+
+    test('push_count 失败/code!=1 时静默回退 unreadHint，不记登录失败', () async {
+      final session = await _sessionWithCookies();
+      final adapter = FakeAdapter((opt) async {
+        if (opt.uri.path.endsWith('push_count.json')) {
+          return jsonBody({'code': 0, 'data': {}});
+        }
+        if (opt.uri.path.endsWith('allGroups')) {
+          return jsonBody(_fixture('message_all_groups.json'));
+        }
+        if (opt.uri.path.endsWith('unreadHint')) {
+          return jsonBody(_fixture('message_unread_hint.json'));
+        }
+        return jsonBody(_fixture('message_summary.json'));
+      });
+      final svc = await _svc(adapter, session: session);
+
+      final u = await svc.getMessageSummary();
+      // 与无 push_count 时一致：数值全部来自 unreadHint 夹具
+      expect(u.mentionStatuses, 3);
+      expect(u.likesToMe, 5);
+      expect(u.total, 11);
+      expect(session.recentLoginFailures, isEmpty);
     });
   });
 }

@@ -775,6 +775,10 @@ class WbComment {
   final String createdAtRaw;
   final String source;
   final int likeCount;
+
+  /// 当前登录用户是否已赞此评论（主包评论数据变换实证字段
+  /// `liked`，访客态样本不带、默认 false）。
+  final bool liked;
   final int floorNumber;
 
   /// 内嵌回复（楼中楼）：buildComments 响应里评论对象自带的 comments 子列表。
@@ -792,6 +796,7 @@ class WbComment {
     this.createdAtRaw = '',
     this.source = '',
     this.likeCount = 0,
+    this.liked = false,
     this.floorNumber = 0,
     this.replies = const [],
     this.pic,
@@ -806,6 +811,7 @@ class WbComment {
       createdAtRaw: _strOf(j['created_at']),
       source: _strOf(j['source']),
       likeCount: _intOf(j['like_count'] ?? j['like_counts']),
+      liked: _boolOf(j['liked']),
       floorNumber: _intOf(j['floor_number']),
       replies: _listOf(j['comments'])
           .map((e) => WbComment.fromJson(_mapOf(e)))
@@ -857,15 +863,21 @@ class WbComment {
     return null;
   }
 
-  /// 局部更新（删楼中楼回复时换 replies 用，其余字段原样带过）。
-  WbComment copyWith({List<WbComment>? replies}) {
+  /// 局部更新（删楼中楼回复时换 replies、点赞乐观更新时换
+  /// liked/likeCount 用，其余字段原样带过）。
+  WbComment copyWith({
+    List<WbComment>? replies,
+    bool? liked,
+    int? likeCount,
+  }) {
     return WbComment(
       id: id,
       user: user,
       text: text,
       createdAtRaw: createdAtRaw,
       source: source,
-      likeCount: likeCount,
+      likeCount: likeCount ?? this.likeCount,
+      liked: liked ?? this.liked,
       floorNumber: floorNumber,
       replies: replies ?? this.replies,
       pic: pic,
@@ -920,6 +932,16 @@ class WbChannel {
     'title': title,
     'containerid': containerid,
   };
+}
+
+/// 关注分组（allGroups 中 group_type==0 分段的条目）：
+/// gid 是「list_id+本人 uid」拼接的完整串（如 100051641537045），
+/// 时间线请求原样回传（主包 formatGroup / 时间线加载器实证）。
+class WbFollowGroup {
+  final String gid;
+  final String title;
+
+  const WbFollowGroup({required this.gid, required this.title});
 }
 
 class HotWord {
