@@ -8,11 +8,13 @@ import '../services/weiyue_service.dart';
 import '../widgets/cover_image.dart';
 import '../widgets/responsive_status_list.dart';
 import '../widgets/status_card.dart';
+import 'dm_chat_screen.dart';
 
-/// 消息中心（登录态只读）：四页签——全部（msgList 混合流）、
-/// @我的（微博/评论子切换）、评论（收到的/发出的子切换）、赞。
-/// 页签结构与 PC 网页端主包消息页配置（tagMessage）对齐；
-/// 写/发送私信不在本页范围。未登录不会进到这个页面
+/// 消息中心（登录态）：五页签——全部（msgList 混合流）、
+/// @我的（微博/评论子切换）、评论（收到的/发出的子切换）、赞、
+/// 私信。分类页签结构与 PC 网页端主包消息页配置（tagMessage）
+/// 对齐；私信页签走独立的 WebIM 子系统（api.weibo.com/webim，
+/// 见 _DmTab 与 dm_chat_screen）。未登录不会进到这个页面
 /// （入口在「我的」登录区，与我的关注/收藏一致）。
 class MessageCenterScreen extends StatefulWidget {
   const MessageCenterScreen({super.key});
@@ -29,7 +31,7 @@ class _MessageCenterScreenState extends State<MessageCenterScreen>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 4, vsync: this);
+    _tabs = TabController(length: 5, vsync: this);
     _loadUnread();
   }
 
@@ -77,6 +79,7 @@ class _MessageCenterScreenState extends State<MessageCenterScreen>
             _tabLabel('@我的', _unread.mentions),
             _tabLabel('评论', _unread.commentsToMe),
             _tabLabel('赞', _unread.likesToMe),
+            _tabLabel('私信', _unread.directMessages),
           ],
         ),
       ),
@@ -87,6 +90,7 @@ class _MessageCenterScreenState extends State<MessageCenterScreen>
           _MentionsTab(),
           _CommentsTab(),
           _LikesTab(),
+          _DmTab(),
         ],
       ),
     );
@@ -705,6 +709,169 @@ class _LikesTab extends StatelessWidget {
         timeRaw: item.createdAtRaw,
         quoteText: item.commentText.isNotEmpty ? '评论：${item.commentText}' : '',
         status: item.status,
+      ),
+    );
+  }
+}
+
+// ---------------- 私信（WebIM 子系统） ----------------
+
+/// 私信页签：会话列表走 api.weibo.com/webim（网页版聊天应用
+/// 同款接口，bundle 实证见 WEIBO_API.md「私信」小节）。
+/// 主列表（已关注/互通过消息）+「未关注人消息」一节（public 族）；
+/// 点进 DmChatScreen 聊天页；从聊天页返回后重拉列表（已读态、
+/// 最新摘要随服务端更新）。下拉可刷新。
+class _DmTab extends StatefulWidget {
+  const _DmTab();
+
+  @override
+  State<_DmTab> createState() => _DmTabState();
+}
+
+class _DmTabState extends State<_DmTab> with AutomaticKeepAliveClientMixin {
+  late final WeiyueService _svc;
+  List<DmConversation> _chats = [];
+  List<DmConversation> _strangers = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void initState() {
+    super.initState();
+    _svc = context.read<WeiyueService>();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final r = await _svc.getDmConversations();
+      if (!mounted) return;
+      setState(() {
+        _chats = r.chats;
+        _strangers = r.strangers;
+        _loading = false;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e is WeiyueException ? e.message : '$e';
+      });
+    }
+  }
+
+  Future<void> _open(DmConversation conv) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => DmChatScreen(conversation: conv)),
+    );
+    if (mounted) _load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(_error!, textAlign: TextAlign.center),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.tonal(onPressed: _load, child: const Text('重试')),
+          ],
+        ),
+      );
+    }
+    if (_chats.isEmpty && _strangers.isEmpty) {
+      return const Center(child: Text('暂无私信'));
+    }
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          for (final c in _chats) _DmTile(conv: c, onTap: () => _open(c)),
+          if (_strangers.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Text(
+                '未关注人消息',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+            for (final c in _strangers)
+              _DmTile(conv: c, onTap: () => _open(c)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// 会话行：头像 / 昵称 / 最后一条摘要 / 时间 / 未读数徽标。
+class _DmTile extends StatelessWidget {
+  final DmConversation conv;
+  final VoidCallback onTap;
+
+  const _DmTile({required this.conv, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final unread = conv.unreadCount;
+    return ListTile(
+      onTap: onTap,
+      leading: CoverImage(
+        url: conv.user.avatar,
+        size: 46,
+        radius: 23,
+        fallbackIcon: Icons.person_outline,
+      ),
+      title: Text(
+        conv.user.screenName,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+      subtitle: conv.lastText.isEmpty
+          ? null
+          : Text(
+              conv.lastText,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+      trailing: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (conv.lastTime != null)
+            Text(
+              formatTimeAgo(conv.lastTime),
+              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+            ),
+          if (unread > 0) ...[
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: cs.error,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Text(
+                unread > 99 ? '99+' : '$unread',
+                style: TextStyle(fontSize: 11, color: cs.onError),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

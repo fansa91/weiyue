@@ -66,13 +66,14 @@ void main() {
       await _settle(tester);
     }
 
-    testWidgets('四页签 + 未读徽标渲染，全部页签显示混合流条目', (tester) async {
+    testWidgets('五页签 + 未读徽标渲染，全部页签显示混合流条目', (tester) async {
       await mockNetworkImagesFor(() async {
         await pumpCenter(tester);
         expect(find.text('全部'), findsOneWidget);
         expect(find.text('@我的'), findsOneWidget);
         expect(find.text('评论'), findsWidgets);
         expect(find.text('赞'), findsOneWidget);
+        expect(find.text('私信'), findsOneWidget);
         // 徽标：@我的 3、评论 3、赞 4，共 3 个
         expect(find.byType(Badge), findsNWidgets(3));
         expect(find.text('4'), findsOneWidget);
