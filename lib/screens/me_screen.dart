@@ -64,7 +64,7 @@ class _MeScreenState extends State<MeScreen> {
     }
   }
 
-  /// 已登录账号卡底部的动作行：编辑资料（多账号切换在同一行扩展）。
+  /// 已登录账号卡底部的动作行：编辑资料 + 切换账号。
   Widget _accountActionsRow(BuildContext context) {
     return Row(
       children: [
@@ -75,7 +75,85 @@ class _MeScreenState extends State<MeScreen> {
           icon: const Icon(Icons.edit_outlined, size: 18),
           label: const Text('编辑资料'),
         ),
+        TextButton.icon(
+          onPressed: _openAccountSwitcher,
+          icon: const Icon(Icons.switch_account_outlined, size: 18),
+          label: const Text('切换账号'),
+        ),
       ],
+    );
+  }
+
+  /// 账号切换面板：已保存账号列表（当前打勾、过期标注、非当前可删）
+  /// + 添加账号（先存好当前账号，再走登录页收割新账号）。
+  Future<void> _openAccountSwitcher() async {
+    final session = context.read<SessionService>();
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetCtx) {
+        final cs = Theme.of(sheetCtx).colorScheme;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '切换账号',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              for (final acc in session.accounts)
+                ListTile(
+                  leading: CircleAvatar(
+                    backgroundImage:
+                        acc.avatar.isNotEmpty ? NetworkImage(acc.avatar) : null,
+                    child: acc.avatar.isEmpty
+                        ? const Icon(Icons.person, size: 20)
+                        : null,
+                  ),
+                  title: Text(
+                    acc.screenName.isNotEmpty ? acc.screenName : '账号 ${acc.uid}',
+                  ),
+                  subtitle: Text([
+                    'ID ${acc.uid}',
+                    if (acc.expired) '登录已过期',
+                  ].join(' · ')),
+                  trailing: acc.uid == session.activeUid
+                      ? Icon(Icons.check, color: cs.primary)
+                      : IconButton(
+                          tooltip: '删除账号',
+                          icon: const Icon(Icons.delete_outline, size: 20),
+                          onPressed: () async {
+                            Navigator.pop(sheetCtx);
+                            await session.removeAccount(acc.uid);
+                          },
+                        ),
+                  onTap: acc.uid == session.activeUid
+                      ? null
+                      : () async {
+                          Navigator.pop(sheetCtx);
+                          await session.switchAccount(acc.uid);
+                        },
+                ),
+              ListTile(
+                leading: const CircleAvatar(child: Icon(Icons.add, size: 20)),
+                title: const Text('添加账号'),
+                onTap: () async {
+                  Navigator.pop(sheetCtx);
+                  await session.beginAddAccount();
+                  if (!mounted) return;
+                  await _openLogin();
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -461,6 +539,40 @@ class _MeScreenState extends State<MeScreen> {
                 '登录在内嵌的官方页面完成，本应用不接触你的账号密码。',
                 style: TextStyle(fontSize: 12.5, color: cs.onSurfaceVariant),
               ),
+              if (session.accounts.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 4),
+                Text(
+                  '已保存的账号',
+                  style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+                ),
+                for (final acc in session.accounts)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: CircleAvatar(
+                      backgroundImage: acc.avatar.isNotEmpty
+                          ? NetworkImage(acc.avatar)
+                          : null,
+                      child: acc.avatar.isEmpty
+                          ? const Icon(Icons.person, size: 20)
+                          : null,
+                    ),
+                    title: Text(
+                      acc.screenName.isNotEmpty
+                          ? acc.screenName
+                          : '账号 ${acc.uid}',
+                    ),
+                    subtitle: Text([
+                      'ID ${acc.uid}',
+                      if (acc.expired) '登录已过期',
+                    ].join(' · ')),
+                    trailing: FilledButton.tonal(
+                      onPressed: () => session.switchAccount(acc.uid),
+                      child: const Text('切换'),
+                    ),
+                  ),
+              ],
             ],
           ),
         ),

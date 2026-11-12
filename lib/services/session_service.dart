@@ -88,6 +88,21 @@ class LoginApiFailure {
   }
 }
 
+/// 一个已保存账号的对外摘要（多账号列表展示用；不含 Cookie 值）。
+class SessionAccount {
+  final String uid;
+  final String screenName;
+  final String avatar;
+  final bool expired;
+
+  const SessionAccount({
+    required this.uid,
+    this.screenName = '',
+    this.avatar = '',
+    this.expired = false,
+  });
+}
+
 /// 登录会话：WebView 官方登录后收割的 Cookie 整表、当前用户信息与两栈探活结果。
 ///
 /// 安全约束（硬性）：
@@ -101,6 +116,12 @@ class SessionService extends ChangeNotifier {
   static const _keyExpired = 'weiyue_session_expired_v1';
   static const _keyProfile = 'weiyue_session_profile_v1';
   static const _keyDiag = 'weiyue_session_diag_v1';
+
+  /// 多账号快照表：每条 = 一个账号的完整会话（Cookie 表/用户/资料/
+  /// 探活/过期标记）。实时会话仍走上面的单份键，切换 = 快照互换，
+  /// 既有读写路径零感知。
+  static const _keyAccounts = 'weiyue_session_accounts_v1';
+  List<Map<String, dynamic>> _accountRecords = [];
 
   /// domain -> {name: value}
   Map<String, Map<String, String>> _cookies = {};
@@ -348,6 +369,24 @@ class SessionService extends ChangeNotifier {
       } catch (_) {}
     }
     _expired = prefs.getBool(_keyExpired) ?? false;
+    final accountsRaw = prefs.getString(_keyAccounts);
+    if (accountsRaw != null && accountsRaw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(accountsRaw);
+        if (decoded is List) {
+          _accountRecords = [
+            for (final e in decoded)
+              if (e is Map) e.map((k, v) => MapEntry('$k', v)),
+          ]..removeWhere((r) => '${r['uid'] ?? ''}'.isEmpty);
+        }
+      } catch (_) {
+        _accountRecords = [];
+      }
+    }
+    // 迁移：老版本只有单份会话且已知 uid → 直接登记为一个账号。
+    if (_accountRecords.isEmpty && isLoggedIn && _uid.isNotEmpty) {
+      _syncActiveRecord();
+    }
   }
 
   Future<void> _persist() async {
@@ -377,6 +416,7 @@ class SessionService extends ChangeNotifier {
       (_cookies[entry.key] ??= {}).addAll(entry.value);
     }
     await _persist();
+    _syncActiveRecord();
     notifyListeners();
   }
 
@@ -396,6 +436,7 @@ class SessionService extends ChangeNotifier {
     if (mUnlocked != null) _mUnlocked = mUnlocked;
     if ((pcUnlocked ?? false) || (mUnlocked ?? false)) _expired = false;
     await _persist();
+    _syncActiveRecord();
     notifyListeners();
   }
 
@@ -408,7 +449,141 @@ class SessionService extends ChangeNotifier {
     if (user.screenName.isNotEmpty) _screenName = user.screenName;
     if (user.avatar.isNotEmpty) _avatar = user.avatar;
     await _persist();
+    _syncActiveRecord();
     notifyListeners();
+  }
+
+  // ---------------- 多账号 ----------------
+
+  /// 已保存账号列表（添加顺序；不含 Cookie 值）。
+  List<SessionAccount> get accounts => [
+        for (final r in _accountRecords)
+          SessionAccount(
+            uid: '${r['uid'] ?? ''}',
+            screenName: '${r['screen_name'] ?? ''}',
+            avatar: '${r['avatar'] ?? ''}',
+            expired: r['expired'] == true,
+          ),
+      ];
+
+  /// 当前活动账号 uid（未登录为空串）。
+  String get activeUid => _uid;
+
+  static Map<String, Map<String, String>> _storeFromJson(dynamic v) {
+    if (v is! Map) return {};
+    return v.map((k, val) {
+      final inner = val is Map
+          ? val.map((ik, iv) => MapEntry('$ik', '$iv'))
+          : <String, String>{};
+      return MapEntry(normalizeDomain('$k'), inner);
+    });
+  }
+
+  /// 把实时会话快照进账号表（同 uid 覆盖）：uid 未知（刚收割未探活）
+  /// 或未登录时不动表。落盘异步尽力而为，内存表同步更新。
+  void _syncActiveRecord() {
+    if (!isLoggedIn || _uid.isEmpty) return;
+    final record = <String, dynamic>{
+      'uid': _uid,
+      'screen_name': _screenName,
+      'avatar': _avatar,
+      'cookies': _cookies.map(
+        (k, v) => MapEntry(k, Map<String, String>.from(v)),
+      ),
+      'profile': _profile?.toJson(),
+      'pc': _pcUnlocked,
+      'm': _mUnlocked,
+      'expired': _expired,
+    };
+    final idx = _accountRecords.indexWhere((r) => r['uid'] == _uid);
+    if (idx >= 0) {
+      _accountRecords[idx] = record;
+    } else {
+      _accountRecords.add(record);
+    }
+    _persistAccounts();
+  }
+
+  Future<void> _persistAccounts() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_keyAccounts, jsonEncode(_accountRecords));
+    } catch (_) {}
+  }
+
+  void _applyRecord(Map<String, dynamic> r) {
+    _cookies = _storeFromJson(r['cookies']);
+    _uid = '${r['uid'] ?? ''}';
+    _screenName = '${r['screen_name'] ?? ''}';
+    _avatar = '${r['avatar'] ?? ''}';
+    final profileRaw = r['profile'];
+    _profile = null;
+    if (profileRaw is Map) {
+      final user = WbUser.fromJson(
+        profileRaw.map((k, v) => MapEntry('$k', v)),
+      );
+      if (user.id > 0 || user.screenName.isNotEmpty) _profile = user;
+    }
+    _pcUnlocked = r['pc'] is bool ? r['pc'] as bool : null;
+    _mUnlocked = r['m'] is bool ? r['m'] as bool : null;
+    _expired = r['expired'] == true;
+  }
+
+  /// 切换到已保存的另一个账号：先快照当前，再整体换入目标记录。
+  /// 切换后各页监听会话变化自行重拉（请求层每次现读 Cookie 头）。
+  Future<void> switchAccount(String targetUid) async {
+    await init();
+    if (targetUid.isEmpty || targetUid == _uid) return;
+    _syncActiveRecord();
+    final idx = _accountRecords.indexWhere((r) => r['uid'] == targetUid);
+    if (idx < 0) return;
+    _applyRecord(_accountRecords[idx]);
+    await _persist();
+    await _persistAccounts();
+    notifyListeners();
+  }
+
+  /// 添加账号前置：快照当前账号后清空实时会话（账号表保留），
+  /// 登录页随后在干净的实时会话里收割新账号；新账号探活出 uid
+  /// 后经 _syncActiveRecord 自动入表并成为当前账号。
+  Future<void> beginAddAccount() async {
+    await init();
+    _syncActiveRecord();
+    await _persistAccounts();
+    _clearLiveState();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_keyCookies);
+    await prefs.remove(_keyUser);
+    await prefs.remove(_keyProbe);
+    await prefs.remove(_keyExpired);
+    await prefs.remove(_keyProfile);
+    await prefs.remove(_keyDiag);
+    notifyListeners();
+  }
+
+  /// 删除一个已保存账号；删的是当前账号时等同退出登录。
+  Future<void> removeAccount(String targetUid) async {
+    await init();
+    if (targetUid == _uid) {
+      await clear();
+      return;
+    }
+    _accountRecords.removeWhere((r) => r['uid'] == targetUid);
+    await _persistAccounts();
+    notifyListeners();
+  }
+
+  void _clearLiveState() {
+    _cookies = {};
+    _uid = '';
+    _screenName = '';
+    _avatar = '';
+    _profile = null;
+    _pcUnlocked = null;
+    _mUnlocked = null;
+    _expired = false;
+    _lastProbe = null;
+    _failures.clear();
   }
 
   /// 标记登录已过期（服务端明确未登录信号时由请求层调用）。
@@ -420,21 +595,18 @@ class SessionService extends ChangeNotifier {
     SharedPreferences.getInstance().then(
       (prefs) => prefs.setBool(_keyExpired, true),
     );
+    _syncActiveRecord();
     notifyListeners();
   }
 
-  /// 退出登录：清掉全部本地会话数据，回到访客态。
+  /// 退出登录：清掉当前账号的本地会话数据并把它移出账号表
+  /// （其他已保存账号不受影响），回到访客态。
   Future<void> clear() async {
-    _cookies = {};
-    _uid = '';
-    _screenName = '';
-    _avatar = '';
-    _profile = null;
-    _pcUnlocked = null;
-    _mUnlocked = null;
-    _expired = false;
-    _lastProbe = null;
-    _failures.clear();
+    await init();
+    if (_uid.isNotEmpty) {
+      _accountRecords.removeWhere((r) => r['uid'] == _uid);
+    }
+    _clearLiveState();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyCookies);
     await prefs.remove(_keyUser);
@@ -442,6 +614,7 @@ class SessionService extends ChangeNotifier {
     await prefs.remove(_keyExpired);
     await prefs.remove(_keyProfile);
     await prefs.remove(_keyDiag);
+    await _persistAccounts();
     notifyListeners();
   }
 }
