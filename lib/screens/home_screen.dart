@@ -9,6 +9,8 @@ import '../services/weiyue_service.dart';
 import '../widgets/friends_feed_view.dart';
 import '../widgets/group_feed_view.dart';
 import '../widgets/hot_feed_view.dart';
+import '../widgets/interactions.dart';
+import 'compose_screen.dart';
 
 /// 「关注」频道哨兵（登录后出现在频道行最前）：gid 用本地保留值，
 /// 数据走 friendstimeline，不经 hottimeline 的 WbChannel 参数拼装。
@@ -59,11 +61,8 @@ class _HomeScreenState extends State<HomeScreen> {
   GlobalKey<HotFeedViewState> _feedKeyOf(WbChannel ch) =>
       _feedKeys.putIfAbsent(_keyOf(ch), () => GlobalKey<HotFeedViewState>());
 
-  GlobalKey<GroupFeedViewState> _groupFeedKeyOf(WbChannel ch) =>
-      _groupFeedKeys.putIfAbsent(
-        _keyOf(ch),
-        () => GlobalKey<GroupFeedViewState>(),
-      );
+  GlobalKey<GroupFeedViewState> _groupFeedKeyOf(WbChannel ch) => _groupFeedKeys
+      .putIfAbsent(_keyOf(ch), () => GlobalKey<GroupFeedViewState>());
 
   /// 完整频道行：关注（登录时）+ 热门分类 + 关注分组（登录时）。
   List<WbChannel> _allChannels(bool loggedIn) => [
@@ -167,6 +166,20 @@ class _HomeScreenState extends State<HomeScreen> {
     if (future != null) unawaited(future);
   }
 
+  /// 发帖入口：未登录时 ensureLoggedIn 只提示去登录、不打开编辑页；
+  /// 发布成功返回后提示，并重拉当前频道（自己的新帖在关注流可见）。
+  Future<void> _openComposer() async {
+    if (!ensureLoggedIn(context)) return;
+    final posted = await Navigator.of(
+      context,
+    ).push<bool>(MaterialPageRoute(builder: (_) => const ComposeScreen()));
+    if (posted != true || !mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('发布成功')));
+    _refreshCurrent();
+  }
+
   /// 当前选中频道：选中项已不在列表里（如退出登录后「关注」消失）
   /// 时回落到第一个。
   WbChannel _effectiveSelected(List<WbChannel> channels) {
@@ -196,6 +209,12 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('微阅 · 热门'),
         centerTitle: false,
         actions: [
+          IconButton(
+            key: const ValueKey('home-compose-button'),
+            icon: const Icon(Icons.edit_outlined),
+            tooltip: '发动态',
+            onPressed: _openComposer,
+          ),
           // 桌面端没有下拉手势：宽屏（≥900，与应用既有宽屏断点一致）
           // 显示刷新按钮，只刷当前频道；窄屏不显示，继续下拉刷新。
           if (MediaQuery.sizeOf(context).width >= 900)
