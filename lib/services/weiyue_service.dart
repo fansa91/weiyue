@@ -1987,6 +1987,50 @@ class WeiyueService {
     }
   }
 
+  /// 我的粉丝列表（登录后可用，访客回 `{}`）：与 [getMyFollowing]
+  /// 成对，GET /ajax/friendships/friends?uid=&relate=fans&count=&page=
+  /// （WEIBO_API.md 被挡清单记载的确切路径）。主包关系页调用点同
+  /// 路径另带 type 参数、条目在 data[type].list 信封下，该形态在
+  /// 解析时一并防御（data.users → 顶层 users → data.fans.list →
+  /// data.new_follows.list → data.list）。关系态由条目 user 自带
+  /// following / follow_me 表达（WbUser.fromJson 已解析；主包
+  /// FollowBtn 的 followedBy 取 user.follow_me，文案逻辑：
+  /// following&&follow_me=互相关注、following=已关注、否则回关）。
+  /// uid 为空直接抛错（同 getMyFollowing：空参必 400，不发请求）。
+  /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
+  Future<({List<WbUser> users, int total})> getMyFans(
+    String uid, {
+    int page = 1,
+    int count = 20,
+  }) async {
+    if (uid.trim().isEmpty) {
+      throw const WeiyueException('缺少用户 ID，请先点「修复登录态」或重新检测');
+    }
+    try {
+      final json = await _get(
+        WbStack.pc,
+        '$_pcBase/ajax/friendships/friends',
+        query: {'uid': uid, 'relate': 'fans', 'count': count, 'page': page},
+        referer: 'https://weibo.com/u/$uid',
+      );
+      final data = _asMap(json['data']);
+      var raw = _asList(data['users']);
+      if (raw.isEmpty) raw = _asList(json['users']);
+      if (raw.isEmpty) raw = _asList(_asMap(data['fans'])['list']);
+      if (raw.isEmpty) raw = _asList(_asMap(data['new_follows'])['list']);
+      if (raw.isEmpty) raw = _asList(data['list']);
+      final users = raw
+          .map((e) => WbUser.fromJson(_asMap(e)))
+          .where((u) => u.id > 0)
+          .toList();
+      final totalRaw = data['total_number'] ?? json['total_number'];
+      return (users: users, total: _intOf(totalRaw));
+    } catch (e) {
+      session.recordLoginFailure('/ajax/friendships/friends', '$e');
+      rethrow;
+    }
+  }
+
   // ---------------- 消息中心（登录态只读，/ajax/message 族） ----------------
   // 依据：WEIBO_API.md「登录与写接口」节静态确认路径 + PC 网页端主包
   // （raw/pc_index.js）消息页组件实证：页签配置（tagMessage）、双游标

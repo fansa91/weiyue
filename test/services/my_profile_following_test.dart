@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:weiyue/models/models.dart';
 import 'package:weiyue/services/session_service.dart';
 import 'package:weiyue/services/visitor_service.dart';
 import 'package:weiyue/services/weiyue_service.dart';
@@ -182,6 +183,91 @@ void main() {
       final r = await svc.getMyFollowing('777');
       expect(r.users, isEmpty);
       expect(r.total, 0);
+    });
+  });
+
+  group('getMyFans', () {
+    test('relate=fans 参数逐字 + data.users 解析 + 关系态字段', () async {
+      final session = await _sessionWithCookies();
+      final adapter = FakeAdapter(
+        (opt) async => jsonBody(_fixture('fans_friends.json')),
+      );
+      final svc = WeiyueService(
+        _Visitor(),
+        pcDio: _dio(adapter),
+        session: session,
+      );
+
+      final r = await svc.getMyFans('777');
+      expect(adapter.requests.single.uri.path, '/ajax/friendships/friends');
+      final q = adapter.requests.single.queryParameters;
+      expect(q['uid'], '777');
+      expect(q['relate'], 'fans');
+      expect(q['page'], 1);
+      expect(q['count'], 20);
+      expect(r.total, 3);
+      expect(r.users.length, 3);
+      // 关系态（主包 FollowBtn：following / follow_me 组合）
+      expect(r.users[0].screenName, '粉丝甲');
+      expect(r.users[0].following, isFalse);
+      expect(r.users[0].followMe, isTrue); // 未回关
+      expect(r.users[1].following, isTrue);
+      expect(r.users[1].followMe, isTrue); // 互相关注
+      expect(r.users[1].avatar, 'https://example.com/fb_large.jpg');
+      expect(r.users[2].following, isTrue);
+      expect(r.users[2].followMe, isFalse); // 已关注
+    });
+
+    test('关系页信封形态 data.fans.list 也能解析（主包调用点形态）', () async {
+      final session = await _sessionWithCookies();
+      final adapter = FakeAdapter(
+        (opt) async => jsonBody({
+          'ok': 1,
+          'data': {
+            'fans': {
+              'title': '全部粉丝',
+              'list': [
+                {
+                  'id': 6010,
+                  'screen_name': '信封粉丝',
+                  'following': false,
+                  'follow_me': true,
+                },
+              ],
+            },
+          },
+        }),
+      );
+      final svc = WeiyueService(
+        _Visitor(),
+        pcDio: _dio(adapter),
+        session: session,
+      );
+
+      final r = await svc.getMyFans('777', page: 2);
+      expect(adapter.requests.single.queryParameters['page'], 2);
+      expect(r.users.single.screenName, '信封粉丝');
+      expect(r.users.single.followMe, isTrue);
+    });
+
+    test('访客形态空对象 {} → 空列表、总数 0，不崩', () async {
+      final session = await _sessionWithCookies();
+      final adapter = FakeAdapter((opt) async => jsonBody(<String, dynamic>{}));
+      final svc = WeiyueService(
+        _Visitor(),
+        pcDio: _dio(adapter),
+        session: session,
+      );
+
+      final r = await svc.getMyFans('777');
+      expect(r.users, isEmpty);
+      expect(r.total, 0);
+    });
+
+    test('WbUser.fromJson：follow_me 主字段、followed_by 兜底', () {
+      expect(WbUser.fromJson({'id': 1, 'follow_me': true}).followMe, isTrue);
+      expect(WbUser.fromJson({'id': 1, 'followed_by': true}).followMe, isTrue);
+      expect(WbUser.fromJson({'id': 1}).followMe, isFalse);
     });
   });
 

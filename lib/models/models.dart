@@ -90,6 +90,12 @@ class WbUser {
   /// 访客态恒 false；关注/取关按钮的初始态来源）。
   final bool following;
 
+  /// 此人是否关注了当前登录用户（接口 user 对象自带 follow_me 字段，
+  /// 主包 FollowBtn 的 followedBy 即取 user.follow_me；访客态恒
+  /// false）。与 [following] 组合出关系态（主包 followText 逻辑）：
+  /// 都真=互相关注、仅 following=已关注、仅 followMe=可回关。
+  final bool followMe;
+
   const WbUser({
     required this.id,
     required this.screenName,
@@ -108,6 +114,7 @@ class WbUser {
     this.coverImage = '',
     this.coverImagePhone = '',
     this.following = false,
+    this.followMe = false,
   });
 
   /// 封面展示图：手机版封面优先，其次通用封面。
@@ -132,6 +139,7 @@ class WbUser {
     String? coverImage,
     String? coverImagePhone,
     bool? following,
+    bool? followMe,
   }) {
     return WbUser(
       id: id ?? this.id,
@@ -151,6 +159,7 @@ class WbUser {
       coverImage: coverImage ?? this.coverImage,
       coverImagePhone: coverImagePhone ?? this.coverImagePhone,
       following: following ?? this.following,
+      followMe: followMe ?? this.followMe,
     );
   }
 
@@ -173,6 +182,7 @@ class WbUser {
     'cover_image': coverImage,
     'cover_image_phone': coverImagePhone,
     'following': following,
+    'follow_me': followMe,
   };
 
   String get followersDisplay => followersCount > 0
@@ -201,6 +211,8 @@ class WbUser {
       coverImage: httpsUrl(_strOf(j['cover_image'])),
       coverImagePhone: httpsUrl(_strOf(j['cover_image_phone'])),
       following: _boolOf(j['following']),
+      // 主包口径是 follow_me；个别形态用 followed_by，一并防御。
+      followMe: _boolOf(j['follow_me'] ?? j['followed_by']),
     );
   }
 }
