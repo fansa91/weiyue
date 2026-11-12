@@ -14,8 +14,10 @@ import '../services/weiyue_service.dart';
 import '../widgets/cover_image.dart';
 import '../widgets/network_image.dart';
 
-/// 一张已选图片（选图结果）：[bytes] 已读入内存时直接用；
-/// 草稿恢复的图片只有 [path]，上传时再按路径读字节。
+/// 一张已选图片（选图结果）：选图只记 [path]/[mimeType]，不预读
+/// 字节——几张高清原图就是几百 MB，选图即全量读入会在安卓上把
+/// 内存撑爆闪退；[bytes] 仅供已有字节在手的调用方/测试注入，
+/// 上传时优先用它、否则上传时按路径读。
 class ComposePickedImage {
   final String path;
   final Uint8List? bytes;
@@ -213,13 +215,15 @@ class _ComposeScreenState extends State<ComposeScreen> {
   /// 实现（Windows/Linux）时回落 file_selector 的系统文件框。
   Future<List<ComposePickedImage>> _defaultPickImages(int remaining) async {
     try {
-      final files = await ImagePicker().pickMultiImage();
+      // limit 让系统选图器就卡住可选数（平台不支持时会忽略，
+      // 下面 take(remaining) 再兜底）；只记路径不读字节，
+      // 字节等上传时按需从文件读，避免选图即爆内存。
+      final files = await ImagePicker().pickMultiImage(limit: remaining);
       final picked = <ComposePickedImage>[];
       for (final f in files.take(remaining)) {
         picked.add(
           ComposePickedImage(
             path: f.path,
-            bytes: await f.readAsBytes(),
             mimeType: f.mimeType ?? mimeTypeOfFileName(f.name),
           ),
         );
@@ -245,7 +249,6 @@ class _ComposeScreenState extends State<ComposeScreen> {
       picked.add(
         ComposePickedImage(
           path: f.path,
-          bytes: await f.readAsBytes(),
           mimeType: f.mimeType ?? mimeTypeOfFileName(f.name),
         ),
       );
@@ -272,6 +275,9 @@ class _ComposeScreenState extends State<ComposeScreen> {
         img.state = _ImageUploadState.ready;
         img.pid = pid;
         img.error = null;
+        // 上传成功即释放缓存字节，及时回收内存；ready 图发布
+        // 流程不会再传，真要重读 loadBytes 会按路径重新读。
+        img.bytes = null;
       });
     } catch (e) {
       if (mounted) {
@@ -457,11 +463,20 @@ class _ComposeScreenState extends State<ComposeScreen> {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(8),
+            // 缩略图限解码尺寸（84dp 展示，320 足够三倍屏），
+            // 不按原图尺寸全解码，避免大图把内存吃满。
             child: img.bytes != null
-                ? Image.memory(img.bytes!, fit: BoxFit.cover)
+                ? Image.memory(
+                    img.bytes!,
+                    fit: BoxFit.cover,
+                    cacheWidth: 320,
+                    cacheHeight: 320,
+                  )
                 : Image.file(
                     File(img.path),
                     fit: BoxFit.cover,
+                    cacheWidth: 320,
+                    cacheHeight: 320,
                     errorBuilder: (_, _, _) => Container(
                       color: cs.surfaceContainerHighest,
                       child: const Icon(Icons.broken_image_outlined),

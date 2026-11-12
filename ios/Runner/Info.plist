@@ -72,5 +72,7 @@
 	</array>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>把你选择的图片和视频保存到相册</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>从相册选择要发布的图片</string>
 </dict>
 </plist>
