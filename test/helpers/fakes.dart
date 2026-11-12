@@ -724,6 +724,112 @@ class FakeWeiyueService extends WeiyueService {
     sinceId: '',
     hasMore: false,
   );
+
+  // ---------------- 私信（WebIM）假数据 ----------------
+
+  /// 会话罐头：主列表一条（未读 2）+ 未关注人一条（未读 1）。
+  List<DmConversation> dmChats = [
+    DmConversation(
+      user: const WbUser(
+        id: 1641537791,
+        screenName: '私信测试博主',
+        avatar: 'https://example.com/dm_avatar1.jpg',
+      ),
+      lastText: '最近一条消息摘要',
+      lastMid: 103,
+      lastTime: DateTime(2026, 11, 12, 9, 30),
+      unreadCount: 2,
+    ),
+  ];
+  List<DmConversation> dmStrangers = [
+    DmConversation(
+      user: const WbUser(id: 2000000001, screenName: '未关注的陌生人'),
+      lastText: '陌生人发来的消息',
+      lastMid: 55,
+      lastTime: DateTime(2026, 11, 12, 8, 0),
+      unreadCount: 1,
+      isPublic: true,
+    ),
+  ];
+  bool failDmList = false;
+
+  /// 历史罐头：key=对方 uid，值=时间升序全量记录；
+  /// getDmHistory 按 maxId/count 切页（与真实接口同语义：
+  /// maxId 只取更早、整页返回才 hasMore）。
+  Map<String, List<DmMessage>> dmHistoryStore = {
+    '1641537791': [
+      DmMessage(
+        id: 101,
+        senderId: 1641537791,
+        senderName: '私信测试博主',
+        text: '最早的一条',
+        createdAt: DateTime(2026, 11, 12, 9, 25),
+      ),
+      DmMessage(
+        id: 102,
+        senderId: 777,
+        senderName: '登录测试号',
+        text: '我回复的一条',
+        createdAt: DateTime(2026, 11, 12, 9, 28),
+      ),
+      DmMessage(
+        id: 103,
+        senderId: 1641537791,
+        senderName: '私信测试博主',
+        text: '最新的一条',
+        createdAt: DateTime(2026, 11, 12, 9, 30),
+      ),
+    ],
+  };
+  final List<String> dmHistoryCalls = [];
+  final List<({String uid, String text})> dmSendCalls = [];
+  final List<String> dmReadCalls = [];
+  bool failDmSend = false;
+  int _dmSendSeq = 9000;
+
+  @override
+  Future<({List<DmConversation> chats, List<DmConversation> strangers})>
+  getDmConversations() async {
+    if (failDmList) throw const WeiyueException('私信列表失败（假）');
+    return (chats: dmChats, strangers: dmStrangers);
+  }
+
+  @override
+  Future<({List<DmMessage> messages, bool hasMore})> getDmHistory(
+    String uid, {
+    int maxId = 0,
+    bool isPublic = false,
+    int count = 20,
+  }) async {
+    dmHistoryCalls.add('$uid:$maxId:$isPublic');
+    final all = dmHistoryStore[uid] ?? const <DmMessage>[];
+    final eligible = maxId == 0
+        ? all
+        : all.where((m) => m.id < maxId).toList();
+    final page = eligible.length <= count
+        ? eligible
+        : eligible.sublist(eligible.length - count);
+    return (messages: page, hasMore: eligible.length > count);
+  }
+
+  @override
+  Future<DmMessage> sendDm(String uid, String text) async {
+    dmSendCalls.add((uid: uid, text: text));
+    if (failDmSend) throw const WeiyueException('对方设置了私信权限（假）');
+    return DmMessage(
+      id: ++_dmSendSeq,
+      senderId: 777,
+      senderName: '登录测试号',
+      recipientId: int.tryParse(uid) ?? 0,
+      text: text,
+      createdAt: DateTime(2026, 11, 12, 9, 31),
+    );
+  }
+
+  @override
+  Future<void> markDmRead(String uid, {bool isPublic = false}) async {
+    dmReadCalls.add('$uid:$isPublic');
+  }
 }
 
 /// 假 Dio adapter：记录请求并按 handler 返回。

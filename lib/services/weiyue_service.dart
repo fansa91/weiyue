@@ -2183,6 +2183,234 @@ class WeiyueService {
     }
   }
 
+  // ---------------- 私信（WebIM 子系统，api.weibo.com/webim） ----------------
+  // 依据 WEIBO_API.md「私信」小节（2026-11-12）：网页版聊天应用
+  // bundle（raw/chat_app.js）调用点逐字实证 + 访客探针。与主站
+  // /ajax 族的关键差异：主机是 api.weibo.com；鉴权只靠 .weibo.com
+  // 域登录 Cookie，不带 XSRF、不带 source；失败信封是
+  // {error, error_code}（HTTP 200 也可能带），其中
+  // error_code 21301 = 鉴权未过（访客探针实测原文
+  // "auth by Null spi!"）。全部方法只许登录态：无会话直接抛
+  // 「请先登录」，绝不回退访客（私信没有访客形态）。
+  static const _webimBase = 'https://api.weibo.com';
+
+  Map<String, String> _webimHeaders() => {
+    'User-Agent': visitor.uaOf(WbStack.pc),
+    'Referer': 'https://api.weibo.com/chat/',
+    'Accept': 'application/json, text/plain, */*',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Cookie': session.cookieHeaderFor(WbStack.pc)!,
+  };
+
+  /// WebIM 响应统一处理：解出 JSON 并把 {error} 信封翻译成
+  /// WeiyueException；21301/auth 类先标记登录过期（Cookie 已被
+  /// 服务端拒）。非 JSON 回正文指纹异常，与 _get 同口径。
+  Map<String, dynamic> _webimJson(Response<dynamic> resp) {
+    final status = resp.statusCode ?? 0;
+    final data = resp.data;
+    if (data is! Map) {
+      final rawBody = data is String ? data : '';
+      throw WeiyueException(
+        '接口返回非 JSON（HTTP $status，${bodyFingerprint(rawBody)}）',
+      );
+    }
+    final json = _asMap(data);
+    final errVal = json['error'];
+    final err = errVal == null ? '' : '$errVal'.trim();
+    if (err.isNotEmpty) {
+      final code = _intOf(json['error_code']);
+      if (code == 21301 || err.toLowerCase().contains('auth')) {
+        session.markExpired();
+        throw const WeiyueException('登录态已失效，请重新登录');
+      }
+      throw WeiyueException(err);
+    }
+    return json;
+  }
+
+  Future<Map<String, dynamic>> _webimGet(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    if (!session.hasUsableCookie(WbStack.pc)) {
+      throw const WeiyueException('请先登录');
+    }
+    final Response<dynamic> resp;
+    try {
+      resp = await _pc.get<dynamic>(
+        '$_webimBase$path',
+        queryParameters: query,
+        options: Options(headers: _webimHeaders()),
+      );
+    } on DioException catch (e) {
+      throw WeiyueException('网络错误：${e.message ?? e.type.name}');
+    }
+    return _webimJson(resp);
+  }
+
+  /// WebIM 表单 POST（发送/标记已读）：与 _post 的差异是不要求
+  /// XSRF（chat bundle 的 axios 直发表单、无此头，硬套会误伤）；
+  /// 失败同样记登录诊断，与其他写操作一致。
+  Future<Map<String, dynamic>> _webimPost(
+    String path, {
+    required Map<String, String> form,
+  }) async {
+    if (!session.hasUsableCookie(WbStack.pc)) {
+      session.recordLoginFailure(path, '请先登录');
+      throw const WeiyueException('请先登录');
+    }
+    final Response<dynamic> resp;
+    try {
+      resp = await _pc.post<dynamic>(
+        '$_webimBase$path',
+        data: form,
+        options: Options(
+          contentType: Headers.formUrlEncodedContentType,
+          headers: _webimHeaders(),
+        ),
+      );
+    } on DioException catch (e) {
+      final msg = '网络错误：${e.message ?? e.type.name}';
+      session.recordLoginFailure(path, msg);
+      throw WeiyueException(msg);
+    }
+    try {
+      return _webimJson(resp);
+    } on WeiyueException catch (e) {
+      session.recordLoginFailure(path, e.message);
+      rethrow;
+    }
+  }
+
+  List<DmConversation> _parseDmContacts(
+    Map<String, dynamic> json, {
+    required bool isPublic,
+    bool dropVirtual = false,
+  }) {
+    final out = <DmConversation>[];
+    for (final e in _asList(json['contacts'])) {
+      if (e is! Map) continue;
+      final c = DmConversation.fromJson(_asMap(e), isPublic: isPublic);
+      if (c.user.id <= 0) continue;
+      // type==3 是「未关注人消息」虚拟文件夹条目：其会话内容由
+      // public 族单独成列，混进 1:1 列表会点开一个假用户。
+      if (dropVirtual && c.userType == 3) continue;
+      out.add(c);
+    }
+    return out;
+  }
+
+  /// 私信会话列表：主列表（contacts）+ 未关注人列表
+  /// （public/contacts）。路径/参数与 chat bundle 调用点逐字
+  /// 一致（special_source=3 在路径里，count 取 50 单发；
+  /// bundle 的 chatlistcount 是分段递增的组件状态，客户端简化）。
+  /// public 族失败静默为空（主列表已成立时不被拖累），与
+  /// getMessageSummary 的防御口径一致。
+  Future<({List<DmConversation> chats, List<DmConversation> strangers})>
+  getDmConversations() async {
+    final json = await _webimGet(
+      '/webim/2/direct_messages/contacts.json?special_source=3',
+      query: const {
+        'add_virtual_user': '3,4',
+        'refresh_user_count': 1,
+        'need_back': '0,0',
+        'count': 50,
+        'is_include_folder': 1,
+      },
+    );
+    final chats = _parseDmContacts(json, isPublic: false, dropVirtual: true);
+    var strangers = const <DmConversation>[];
+    try {
+      final pub = await _webimGet(
+        '/webim/2/direct_messages/public/contacts.json',
+      );
+      strangers = _parseDmContacts(pub, isPublic: true);
+    } catch (_) {}
+    return (chats: chats, strangers: strangers);
+  }
+
+  /// 私信历史：服务端 direct_messages 首元为最新（bundle 取 [0]
+  /// 作最新消息实证），这里翻转成时间升序（旧→新）返回。
+  /// maxId=0 取最新一页；续拉更早传已加载最旧一条的 id。
+  /// hasMore 以「整页返回」粗判，翻页回空/重复由 UI 去重兜底。
+  /// notice_messages 的系统提示不进列表（网页端是把 biz_id=5
+  /// 的 tip 拼成条目，形态未全证，跳过不崩）。
+  Future<({List<DmMessage> messages, bool hasMore})> getDmHistory(
+    String uid, {
+    int maxId = 0,
+    bool isPublic = false,
+    int count = 20,
+  }) async {
+    final json = await _webimGet(
+      isPublic
+          ? '/webim/2/direct_messages/public/conversation.json'
+          : '/webim/2/direct_messages/conversation.json',
+      query: {
+        'convert_emoji': 1,
+        'count': count,
+        'max_id': maxId,
+        'uid': uid,
+        'is_include_group': 0,
+        'from_contacts': 1,
+      },
+    );
+    final raw = _asList(json['direct_messages']);
+    final msgs = <DmMessage>[];
+    for (final e in raw) {
+      if (e is! Map) continue;
+      final m = DmMessage.fromJson(_asMap(e));
+      if (m.id <= 0 && m.text.isEmpty && !m.isSystem) continue;
+      msgs.add(m);
+    }
+    return (messages: msgs.reversed.toList(), hasMore: raw.length >= count);
+  }
+
+  /// 发送私信文本：POST /webim/2/direct_messages/new.json。
+  /// 表单取 chat bundle 基础发送函数（tocontact）的最小集原文
+  /// {text, uid, extensions, is_encoded:0, decodetime:1}——
+  /// extensions 里的 clientid 是 comet 连接层维护的运行时标识
+  /// （初始空串、握手后赋值），本端不接长连接，恒传空串（与
+  /// 网页端连接建立前的状态一致）。成功回新消息对象；回执
+  /// 字段不全时以本地发送内容补齐正文与时间。
+  /// ⚠️ 登录态行为未经真实账号实测，待用户真机验证。
+  Future<DmMessage> sendDm(String uid, String text) async {
+    final json = await _webimPost(
+      '/webim/2/direct_messages/new.json',
+      form: {
+        'text': text,
+        'uid': uid,
+        'extensions': '{"clientid":""}',
+        'is_encoded': '0',
+        'decodetime': '1',
+      },
+    );
+    final m = DmMessage.fromJson(json);
+    if (m.text.isNotEmpty && m.createdAt != null) return m;
+    return DmMessage(
+      id: m.id,
+      senderId: m.senderId,
+      senderName: m.senderName,
+      recipientId: m.recipientId,
+      text: m.text.isNotEmpty ? m.text : text,
+      createdAt: m.createdAt ?? DateTime.now(),
+      type: m.type,
+      mediaType: m.mediaType,
+    );
+  }
+
+  /// 标记会话已读：POST set_unread_count（名字是 set，语义是清
+  /// 该会话未读；bundle 在聚焦收消息时的调用点原文
+  /// {type:2, uid, is_include_group:0}）。未关注人会话走
+  /// public 同名接口。
+  Future<void> markDmRead(String uid, {bool isPublic = false}) async {
+    await _webimPost(
+      isPublic
+          ? '/webim/2/direct_messages/public/set_unread_count.json'
+          : '/webim/2/direct_messages/set_unread_count.json',
+      form: {'type': '2', 'uid': uid, 'is_include_group': '0'},
+    );
+  }
+
   // ---------------- 互动写操作（登录态） ----------------
 
   /// 通用 POST（写操作专用）：身份规则与 _get 相反——**只许登录态**。

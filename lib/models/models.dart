@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:intl/intl.dart';
 
 import '../core/long_image.dart';
@@ -1393,6 +1395,168 @@ class MessageLike {
       createdAtRaw: _strOf(j['created_at']),
       status: statusMap.isEmpty ? null : WbStatus.fromJson(statusMap),
       commentText: commentText,
+    );
+  }
+}
+
+// ---------------- 私信（网页版聊天 / WebIM 子系统，api.weibo.com/webim） ----------------
+// 依据：WEIBO_API.md「私信」小节（2026-11-12）——网页版聊天应用
+// bundle（rea-probe raw/chat_app.js）调用点逐字实证的路径/参数/字段
+// + 访客态探针（端点回 21301 鉴权错误，证明存在且登录必需）。
+// 登录态真实返回未经真机实测，解析全部防御式：未知字段忽略、
+// 结构对不上的条目跳过不崩。结构样本见 rea-probe
+// samples/pc_chat_structure.json（bundle 字段整理，假数据）。
+
+/// WebIM 时间字段宽容解析：可能是日期串（"Thu Nov 12 09:30:00
+/// +0800 2026"，parseWbTime 同形态）、ISO 串、秒/毫秒 epoch
+/// （数字或数字串）。都解不出返回 null，UI 退回不显示时间。
+DateTime? parseDmTime(dynamic v) {
+  if (v is num) return _epochToTime(v.toInt());
+  final s = _strOf(v).trim();
+  if (s.isEmpty) return null;
+  final n = int.tryParse(s);
+  if (n != null) return _epochToTime(n);
+  return parseWbTime(s) ?? DateTime.tryParse(s);
+}
+
+DateTime? _epochToTime(int n) {
+  if (n <= 0) return null;
+  // 1e12 量级是毫秒、1e9 量级是秒
+  final ms = n >= 100000000000 ? n : n * 1000;
+  try {
+    return DateTime.fromMillisecondsSinceEpoch(ms);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// type==499 的消息正文不在 text 而在 msg 字段的 JSON 里
+/// （bundle 会话摘要处理原文：JSON.parse(msg).content1）。
+/// 解不出就返回空串，调用方按占位文案处理。
+String _dmTextOf(Map<String, dynamic> j) {
+  var text = _strOf(j['text']);
+  if (text.isEmpty && j['msg'] != null) {
+    try {
+      final decoded = jsonDecode(_strOf(j['msg']));
+      if (decoded is Map) text = _strOf(decoded['content1']);
+    } catch (_) {}
+  }
+  return text;
+}
+
+/// 私信会话（contacts / public/contacts 的一条）：对方用户 +
+/// 最后一条消息摘要 + 未读数。isPublic=true 表示来自未关注人
+/// （public 族）列表，打开时走 public/conversation。
+class DmConversation {
+  final WbUser user;
+
+  /// contacts 里 user 对象自带的 type（bundle 实证：3 是「未关注人
+  /// 消息」虚拟文件夹条目，服务层据此过滤，不进 1:1 会话列表）。
+  final int userType;
+  final String lastText;
+  final int lastMid;
+  final DateTime? lastTime;
+  final int unreadCount;
+  final bool isPublic;
+
+  const DmConversation({
+    required this.user,
+    this.userType = 1,
+    this.lastText = '',
+    this.lastMid = 0,
+    this.lastTime,
+    this.unreadCount = 0,
+    this.isPublic = false,
+  });
+
+  String get uid => '${user.id}';
+
+  factory DmConversation.fromJson(
+    Map<String, dynamic> j, {
+    required bool isPublic,
+  }) {
+    final userMap = _mapOf(j['user']);
+    final msg = _mapOf(j['message']);
+    return DmConversation(
+      user: WbUser.fromJson(userMap),
+      userType: _intOf(userMap['type'] ?? 1),
+      lastText: _dmTextOf(msg),
+      lastMid: _intOf(msg['id']),
+      lastTime: parseDmTime(msg['created_at'] ?? msg['time']),
+      unreadCount: _intOf(j['unread_count']),
+      isPublic: isPublic,
+    );
+  }
+}
+
+/// 本地发送状态（服务端消息恒为 normal；UI 乐观发送时用）。
+enum DmSendState { normal, sending, failed }
+
+/// 一条私信（conversation 的 direct_messages 一条）。
+/// 服务端数组首元为最新，服务层翻转为时间升序后交给 UI。
+class DmMessage {
+  final int id; // 服务端 mid；本地待发/失败条为负数临时 id
+  final int senderId;
+  final String senderName;
+  final int recipientId;
+  final String text;
+  final DateTime? createdAt;
+  final int type; // bundle 条目 type（321 = 系统提示条目）
+  final int mediaType; // 0 文本 / 1 图 / 5 文件 / 10 视频（bundle 实证）
+  final DmSendState sendState;
+
+  const DmMessage({
+    required this.id,
+    required this.senderId,
+    this.senderName = '',
+    this.recipientId = 0,
+    required this.text,
+    this.createdAt,
+    this.type = 1,
+    this.mediaType = 0,
+    this.sendState = DmSendState.normal,
+  });
+
+  bool get isSystem => type == 321;
+
+  bool isMineFrom(int myUid) => myUid > 0 && senderId == myUid;
+
+  /// 展示文本：正文为空的非文本消息给占位（图片/文件/视频附件
+  /// 本批不渲染原件，只占位，与 bundle 的 media_type 语义对齐）。
+  String get displayText {
+    if (text.isNotEmpty) return text;
+    return switch (mediaType) {
+      1 => '[图片]',
+      5 => '[文件]',
+      10 => '[视频]',
+      _ => '[消息]',
+    };
+  }
+
+  DmMessage copyWith({DmSendState? sendState, int? id, DateTime? createdAt}) {
+    return DmMessage(
+      id: id ?? this.id,
+      senderId: senderId,
+      senderName: senderName,
+      recipientId: recipientId,
+      text: text,
+      createdAt: createdAt ?? this.createdAt,
+      type: type,
+      mediaType: mediaType,
+      sendState: sendState ?? this.sendState,
+    );
+  }
+
+  factory DmMessage.fromJson(Map<String, dynamic> j) {
+    return DmMessage(
+      id: _intOf(j['id'] ?? j['mid'] ?? j['dmid']),
+      senderId: _intOf(j['sender_id'] ?? j['from_uid']),
+      senderName: _strOf(j['sender_screen_name']),
+      recipientId: _intOf(j['recipient_id']),
+      text: _dmTextOf(j),
+      createdAt: parseDmTime(j['created_at'] ?? j['time']),
+      type: _intOf(j['type'] ?? 1),
+      mediaType: _intOf(j['media_type']),
     );
   }
 }

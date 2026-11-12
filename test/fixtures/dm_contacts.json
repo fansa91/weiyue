@@ -1,0 +1,68 @@
+{
+ "contacts": [
+  {
+   "user": {
+    "id": 1641537791,
+    "name": "私信测试博主",
+    "screen_name": "私信测试博主",
+    "profile_image_url": "https://example.com/dm_avatar1.jpg",
+    "avatar_large": "https://example.com/dm_avatar1_big.jpg",
+    "type": 1,
+    "verified": false
+   },
+   "message": {
+    "id": 5300000000000125,
+    "text": "最新的一条",
+    "type": 1,
+    "media_type": 0,
+    "dm_type": 0,
+    "created_at": "Thu Nov 12 09:29:00 +0800 2026"
+   },
+   "unread_count": 2,
+   "show_message_count": 0,
+   "significant_msgs": 0
+  },
+  {
+   "user": {
+    "id": 2000000002,
+    "name": "另一位博主",
+    "screen_name": "另一位博主",
+    "profile_image_url": "https://example.com/dm_avatar2.jpg",
+    "type": 1,
+    "verified": true
+   },
+   "message": {
+    "id": 5300000000000201,
+    "text": "回头聊",
+    "type": 1,
+    "media_type": 0,
+    "dm_type": 0,
+    "created_at": "Thu Nov 12 08:00:00 +0800 2026"
+   },
+   "unread_count": 0,
+   "show_message_count": 0,
+   "significant_msgs": 0
+  },
+  {
+   "user": {
+    "id": 3,
+    "name": "未关注人消息",
+    "screen_name": "未关注人消息",
+    "profile_image_url": "https://example.com/dm_folder.jpg",
+    "type": 3,
+    "verified": false
+   },
+   "message": {
+    "id": 5300000000000009,
+    "text": "文件夹聚合摘要",
+    "type": 1,
+    "media_type": 0,
+    "dm_type": 12,
+    "created_at": "Thu Nov 12 08:30:00 +0800 2026"
+   },
+   "unread_count": 5,
+   "show_message_count": 0,
+   "significant_msgs": 0
+  }
+ ]
+}

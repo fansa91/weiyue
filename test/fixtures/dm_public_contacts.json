@@ -1,0 +1,25 @@
+{
+ "contacts": [
+  {
+   "user": {
+    "id": 2000000001,
+    "name": "未关注的陌生人",
+    "screen_name": "未关注的陌生人",
+    "profile_image_url": "",
+    "type": 1,
+    "verified": false
+   },
+   "message": {
+    "id": 5300000000000055,
+    "text": "陌生人发来的消息",
+    "type": 1,
+    "media_type": 0,
+    "dm_type": 0,
+    "created_at": "Thu Nov 12 08:00:00 +0800 2026"
+   },
+   "unread_count": 1,
+   "show_message_count": 0,
+   "significant_msgs": 0
+  }
+ ]
+}

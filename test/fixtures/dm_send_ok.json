@@ -1,0 +1,10 @@
+{
+ "id": 5300000000000126,
+ "created_at": "Thu Nov 12 09:31:00 +0800 2026",
+ "sender_id": 777000001,
+ "sender_screen_name": "登录测试号",
+ "recipient_id": 1641537791,
+ "recipient_screen_name": "私信测试博主",
+ "text": "你好，这是一条私信",
+ "type": 1
+}
