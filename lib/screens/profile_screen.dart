@@ -678,6 +678,14 @@ class _PagedStatusesState extends State<_PagedStatuses>
     return ResponsiveStatusList(
       items: _items,
       header: widget.header,
+      // 本人主页删帖与「我的帖子」页同口径：卡片菜单删除成功后
+      // 即时摘除条目（菜单逻辑在 StatusCard 内共享，不另写一套）。
+      onStatusDeleted: (s) {
+        setState(() => _items.removeWhere((e) => e.id == s.id));
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(content: Text('动态已删除')));
+      },
       footer: Padding(
         padding: const EdgeInsets.all(16),
         child: Center(

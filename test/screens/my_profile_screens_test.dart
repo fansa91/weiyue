@@ -75,8 +75,10 @@ void main() {
         expect(find.text('关注'), findsOneWidget);
         expect(find.text('粉丝'), findsOneWidget);
         expect(find.text('动态'), findsOneWidget);
-        // 刷新资料入口 + 我的关注入口都在
+        // 刷新资料入口 + 我的关注入口都在（关注行在列表下部，
+        // 新增「我的帖子」行后已出首屏懒加载区，先滚到它）
         expect(find.byTooltip('刷新资料'), findsOneWidget);
+        await tester.scrollUntilVisible(find.text('我的关注'), 120);
         expect(find.text('我的关注'), findsOneWidget);
         expect(find.text('我的收藏'), findsOneWidget);
       });

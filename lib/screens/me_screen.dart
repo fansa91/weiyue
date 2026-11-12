@@ -8,11 +8,13 @@ import '../services/visitor_service.dart';
 import '../services/weiyue_service.dart';
 import '../widgets/network_image.dart';
 import 'edit_profile_screen.dart';
+import 'fans_screen.dart';
 import 'favorites_screen.dart';
 import 'likes_screen.dart';
 import 'following_screen.dart';
 import 'login_screen.dart';
 import 'message_center_screen.dart';
+import 'my_posts_screen.dart';
 import 'settings_screen.dart';
 import 'theme_screen.dart';
 import '../widgets/about_dialog.dart';
@@ -296,6 +298,16 @@ class _MeScreenState extends State<MeScreen> {
     );
   }
 
+  void _openFans(String uid, {int total = 0}) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => DetailScaffold(
+          child: FansScreen(uid: uid, initialTotal: total),
+        ),
+      ),
+    );
+  }
+
   /// 消息未读：登录态出现（或换了账号）时拉一次汇总，帧后异步执行，
   /// 不在 build 里 setState；退出登录后 uid 变化会自然失效重拉。
   void _maybeLoadMsgUnread(SessionService session) {
@@ -349,6 +361,18 @@ class _MeScreenState extends State<MeScreen> {
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => const DetailScaffold(child: LikesScreen()),
+                ),
+              ),
+            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            ListTile(
+              leading: const Icon(Icons.article_outlined),
+              title: const Text('我的帖子'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) =>
+                      const DetailScaffold(child: MyPostsScreen()),
                 ),
               ),
             ),
@@ -808,7 +832,17 @@ class _MeScreenState extends State<MeScreen> {
                               total: profile.friendsCount,
                             ),
                     ),
-                    _stat(context, '粉丝', profile.followersCount),
+                    _stat(
+                      context,
+                      '粉丝',
+                      profile.followersCount,
+                      onTap: myUid.isEmpty
+                          ? null
+                          : () => _openFans(
+                              myUid,
+                              total: profile.followersCount,
+                            ),
+                    ),
                     _stat(context, '动态', profile.statusesCount),
                   ],
                 ),

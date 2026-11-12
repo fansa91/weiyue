@@ -22,12 +22,17 @@ int feedColumnCount(double width) {
 /// [header] 显示在列表顶部（两种模式都在）；[footer] 置底
 /// （加载/到底/空态文案由调用方决定）。滚动由 [controller] 驱动，
 /// 调用方负责监听翻页。
+///
+/// [onStatusDeleted] 透传给卡片的 onDeleted（本人帖子菜单删帖成功
+/// 后回调）：不传时卡片只弹「动态已删除」提示、条目随下次刷新
+/// 消失；传了则由调用方即时摘除条目（我的帖子页/本人主页）。
 class ResponsiveStatusList extends StatelessWidget {
   final List<WbStatus> items;
   final ScrollController? controller;
   final Widget? header;
   final Widget? footer;
   final EdgeInsets padding;
+  final ValueChanged<WbStatus>? onStatusDeleted;
 
   const ResponsiveStatusList({
     super.key,
@@ -36,6 +41,7 @@ class ResponsiveStatusList extends StatelessWidget {
     this.header,
     this.footer,
     this.padding = const EdgeInsets.fromLTRB(8, 8, 8, 0),
+    this.onStatusDeleted,
   });
 
   @override
@@ -60,7 +66,10 @@ class ResponsiveStatusList extends StatelessWidget {
               if (idx < items.length) {
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: StatusCard(status: items[idx]),
+                  child: StatusCard(
+                    status: items[idx],
+                    onDeleted: onStatusDeleted,
+                  ),
                 );
               }
               return footer ?? const SizedBox.shrink();
@@ -79,7 +88,10 @@ class ResponsiveStatusList extends StatelessWidget {
                 mainAxisSpacing: 10,
                 crossAxisSpacing: 10,
                 childCount: items.length,
-                itemBuilder: (context, i) => StatusCard(status: items[i]),
+                itemBuilder: (context, i) => StatusCard(
+                  status: items[i],
+                  onDeleted: onStatusDeleted,
+                ),
               ),
             ),
             if (footer != null) SliverToBoxAdapter(child: footer),
