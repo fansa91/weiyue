@@ -973,6 +973,70 @@ class SearchResult {
   const SearchResult({this.users = const [], this.statuses = const []});
 }
 
+/// 搜索分类（m container `100103type={N}`，2026-11-12 访客探针实证：
+/// 全部第一页可读；专属分类访客态翻页会被 302 跳登录，只有一页量）。
+enum SearchCategory {
+  all(1, '综合'),
+  realtime(61, '实时'),
+  users(3, '用户'),
+  video(64, '视频'),
+  pics(63, '图片'),
+  topic(38, '话题'),
+  supertopic(98, '超话');
+
+  const SearchCategory(this.type, this.label);
+
+  /// containerid 里的 type 值。
+  final int type;
+  final String label;
+
+  bool get isTopicLike => this == topic || this == supertopic;
+}
+
+/// 话题 / 超话条目（搜索 card_type=8：title_sub 标题、desc1 简介、
+/// desc2 统计文案、pic 封面、scheme 指向话题/超话容器页）。
+class WbTopicEntry {
+  final String title;
+  final String desc1;
+  final String desc2;
+  final String pic;
+  final String scheme;
+
+  const WbTopicEntry({
+    this.title = '',
+    this.desc1 = '',
+    this.desc2 = '',
+    this.pic = '',
+    this.scheme = '',
+  });
+
+  factory WbTopicEntry.fromJson(Map<String, dynamic> j) => WbTopicEntry(
+        title: _strOf(j['title_sub']),
+        desc1: _strOf(j['desc1']),
+        desc2: _strOf(j['desc2']),
+        pic: httpsUrl(_strOf(j['pic'])),
+        scheme: _strOf(j['scheme']),
+      );
+}
+
+/// 一个分类的一页搜索结果（按分类只填对应列表）。
+/// [nextPage] 是 cardlistInfo.page 给出的下一页序号，0 表示没有下一页。
+class SearchCategoryPage {
+  final List<WbStatus> statuses;
+  final List<WbUser> users;
+  final List<WbTopicEntry> topics;
+  final int total;
+  final int nextPage;
+
+  const SearchCategoryPage({
+    this.statuses = const [],
+    this.users = const [],
+    this.topics = const [],
+    this.total = 0,
+    this.nextPage = 0,
+  });
+}
+
 /// 把微博正文 HTML 剥成纯文本：<br>→换行、<img alt>保留表情文本、其余标签去掉。
 String stripHtml(String html) {
   if (html.isEmpty) return '';

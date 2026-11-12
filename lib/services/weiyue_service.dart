@@ -913,6 +913,71 @@ class WeiyueService {
     return SearchResult(users: users, statuses: statuses);
   }
 
+  /// 分类搜索一页（2026-11-12 访客探针实证，见 WEIBO_API「搜索分类页签
+  /// 探针」）：与综合同一容器形态，只换 containerid 的 type 值。
+  /// - 实时(61)/图片(63)：纯 card_type=9 微博卡，递归 walk 收集 mblog；
+  /// - 视频(64)：分组卡里的 card_type=9 子卡（带 page_info 可播视频）+
+  ///   顶层微博卡；86/42 等专卡/标题卡没有 mblog，自然跳过；
+  /// - 用户(3)：分组卡内 card_type=10 的完整 user 对象；
+  /// - 话题(38)/超话(98)：分组卡内 card_type=8 条目。
+  /// 分页：cardlistInfo.page 是下一页序号；访客态专属分类第 2 页会被
+  /// 302 跳登录（_get 抛非 JSON 异常），调用方应静默按没有更多处理。
+  Future<SearchCategoryPage> searchCategory(
+    String keyword,
+    SearchCategory category, {
+    int page = 1,
+  }) async {
+    final data = await _container({
+      'containerid':
+          '100103type=${category.type}&q=${Uri.encodeComponent(keyword)}&t=0',
+      'page_type': 'searchall',
+      'page': page,
+    }, referer: 'https://m.weibo.cn/search');
+    final info = _asMap(data['cardlistInfo']);
+    final users = <WbUser>[];
+    final statuses = <WbStatus>[];
+    final topics = <WbTopicEntry>[];
+    final seenUsers = <int>{};
+    final seenStatuses = <String>{};
+
+    void walk(Map<String, dynamic> card) {
+      final typeRaw = card['card_type'];
+      final cardType = typeRaw is num
+          ? typeRaw.toInt()
+          : int.tryParse('$typeRaw') ?? 0;
+      if (category.isTopicLike && cardType == 8) {
+        final entry = WbTopicEntry.fromJson(card);
+        if (entry.title.isNotEmpty) topics.add(entry);
+      }
+      final mblog = _asMap(card['mblog']);
+      if (mblog.isNotEmpty) {
+        final s = WbStatus.fromJson(mblog);
+        if (s.id.isNotEmpty && seenStatuses.add(s.id)) statuses.add(s);
+      }
+      final user = _asMap(card['user']);
+      if (user.isNotEmpty) {
+        final u = WbUser.fromJson(user);
+        if (u.id > 0 && seenUsers.add(u.id)) users.add(u);
+      }
+      for (final g in _asList(card['card_group'])) {
+        walk(_asMap(g));
+      }
+    }
+
+    for (final card in _asList(data['cards'])) {
+      walk(_asMap(card));
+    }
+    final totalRaw = info['total'];
+    final pageRaw = info['page'];
+    return SearchCategoryPage(
+      statuses: statuses,
+      users: users,
+      topics: topics,
+      total: totalRaw is num ? totalRaw.toInt() : 0,
+      nextPage: pageRaw is num ? pageRaw.toInt() : 0,
+    );
+  }
+
   // ---------------- 搜索建议 ----------------
 
   /// PC /ajax/side/search：hotquery 联想词 + users 推荐用户（访客实测可读）。

@@ -1,0 +1,105 @@
+{
+ "ok": 1,
+ "data": {
+  "cardlistInfo": {
+   "is_first_level": 1,
+   "v_p": "42",
+   "containerid": "100103type=3&q=新华社&t=0",
+   "total": 500,
+   "starttime": 1794447831,
+   "search_request_id": "fc0966e62e4b12b2338e97cc611cf438",
+   "search_ssid": "fc0966e62e4b12b2338e97cc611cf438",
+   "search_vsid": "fc0966e62e4b12b2338e97cc611cf438",
+   "can_shared": 1,
+   "page_size": 5,
+   "cardlist_head_cards": [
+    {
+     "head_type_name": "channel_list",
+     "channel_list": [
+      "综合",
+      "实时",
+      "用户",
+      "图片",
+      "视频",
+      "关注",
+      "热门",
+      "话题",
+      "超话",
+      "地点",
+      "商品"
+     ]
+    }
+   ],
+   "show_style": 1,
+   "shared_text": "快来搜索看看http://s.weibo.com/weibo/%E6%96%B0%E5%8D%8E%E7%A4%BE",
+   "share_containerid": "230958type%3D1%26q%3D%25E6%2596%25B0%25E5%258D%258E%25E7%25A4%25BE",
+   "cardlist_title": "新华社",
+   "desc": "",
+   "portrait": "http://h5.sinaimg.cn/upload/2016/07/29/557/link.png",
+   "shared_text_qrcode": "",
+   "share_content": {
+    "custom_share_path": "http://s.weibo.com/weibo?q=%E6%96%B0%E5%8D%8E%E7%A4%BE",
+    "description": "实时资讯，海量讨论",
+    "icon": "http://h5.sinaimg.cn/upload/2016/07/29/557/link.png"
+   },
+   "page": 2
+  },
+  "cards": [
+   {
+    "card_type": 4,
+    "anchorId": "relatedUserSelect",
+    "itemid": "relatedUserSelect",
+    "desc": "筛选",
+    "desc_extr": "精确查找你感兴趣的人",
+    "pic": "https://simg.s.weibo.com/20200512_filter_black.png",
+    "display_arrow": 1,
+    "scheme": "https://m.weibo.cn/p/index?containerid=100103type%3D39%26q%3D%E6%96%B0%E5%8D%8E%E7%A4%BE%26t%3D0&title=%E7%AD%9B%E9%80%8…",
+    "container_color": "#EEEEEE",
+    "container_color_dark": "#151515"
+   },
+   {
+    "card_type": 11,
+    "card_group": [
+     {
+      "card_type": 10,
+      "anchorId": "1001030211_0_0_seqid:2136676091|type:3|t:0|pos:1-0-0|q:新华社|srid:fc0966e62e4b12b2338e97cc611cf438|search_ssid:fc0966e62e4…",
+      "itemid": "1001030211_0_0_seqid:2136676091|type:3|t:0|pos:1-0-0|q:新华社|srid:fc0966e62e4b12b2338e97cc611cf438|search_ssid:fc0966e62e4…",
+      "desc1": "新华社法人微博",
+      "desc2": "粉丝：1.14亿",
+      "scheme": "https://m.weibo.cn/u/1699432410?t=0&launchid=10000360-page_H5",
+      "user": {
+       "id": 1699432410,
+       "screen_name": "新华社",
+       "followers_count": "1.14亿",
+       "description": "新华社官方微博，重大新闻权威首发平台。"
+      }
+     },
+     {
+      "card_type": 10,
+      "anchorId": "1001030211_0_0_seqid:2136676091|type:3|t:0|pos:1-0-1|q:新华社|srid:fc0966e62e4b12b2338e97cc611cf438|search_ssid:fc0966e62e4…",
+      "itemid": "1001030211_0_0_seqid:2136676091|type:3|t:0|pos:1-0-1|q:新华社|srid:fc0966e62e4b12b2338e97cc611cf438|search_ssid:fc0966e62e4…",
+      "desc1": "新华社中国网事微博",
+      "desc2": "粉丝：1358.9万",
+      "scheme": "https://m.weibo.cn/u/1787920531?t=0&launchid=10000360-page_H5",
+      "user": {
+       "id": 1787920531,
+       "screen_name": "新华社中国网事",
+       "followers_count": "1358.9万",
+       "description": "新华新媒文化传播有限公司 聚焦网事 走近网民 讲述网语 影响网络 更多精彩内容请关注——新华社客户端↓↓↓"
+      }
+     }
+    ],
+    "_card_group_total": 20,
+    "show_type": 0
+   }
+  ],
+  "ext_trans": {
+   "search_ssid": "fc0966e62e4b12b2338e97cc611cf438",
+   "search_vsid": "fc0966e62e4b12b2338e97cc611cf438"
+  },
+  "scheme": "sinaweibo://searchall?containerid=100103&q=%E6%96%B0%E5%8D%8E%E7%A4%BE%26t%3D0&_T_WM=96494195586&v_p=42&lfid=100103&laun…",
+  "showAppTips": 0,
+  "_cards_total_in_response": 2
+ },
+ "_probe": "2026-11-12 visitor-state probe, keyword 新华社, trimmed (full card_type distribution in WEIBO_API.md)"
+}

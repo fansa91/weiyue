@@ -320,6 +320,47 @@ class FakeWeiyueService extends WeiyueService {
   Future<SearchSuggest> getSearchSuggest(String q) async =>
       const SearchSuggest();
 
+  /// 分类搜索默认实现：综合转调 search()（子类覆写 search 即生效），
+  /// 其余分类给一页罐头数据、nextPage=0（已到底）。
+  @override
+  Future<SearchCategoryPage> searchCategory(
+    String keyword,
+    SearchCategory category, {
+    int page = 1,
+  }) async {
+    if (category == SearchCategory.all) {
+      final r = await search(keyword, page: page);
+      return SearchCategoryPage(
+        statuses: r.statuses,
+        users: r.users,
+        total: r.statuses.length + r.users.length,
+      );
+    }
+    if (page > 1) return const SearchCategoryPage();
+    return switch (category) {
+      SearchCategory.users => SearchCategoryPage(
+          users: [makeStatus().user!],
+          total: 1,
+        ),
+      SearchCategory.topic || SearchCategory.supertopic =>
+        const SearchCategoryPage(
+          topics: [
+            WbTopicEntry(
+              title: '#测试话题#',
+              desc1: '测试话题',
+              desc2: '10讨论 100阅读',
+              pic: 'https://example.com/topic.jpg',
+            ),
+          ],
+          total: 1,
+        ),
+      _ => SearchCategoryPage(
+          statuses: [makeStatus(id: 'cat1', text: '分类结果一')],
+          total: 1,
+        ),
+    };
+  }
+
   @override
   Future<ContainerPage> getTopicStatuses(String topic, {int page = 1}) async =>
       ContainerPage(

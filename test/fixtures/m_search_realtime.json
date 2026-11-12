@@ -1,0 +1,140 @@
+{
+ "ok": 1,
+ "data": {
+  "cardlistInfo": {
+   "is_first_level": 1,
+   "v_p": "42",
+   "containerid": "100103type=61&q=新华社&t=0",
+   "total": 888,
+   "starttime": 1794447822,
+   "search_request_id": "6df46566dce6568d62381ede4c7f40be",
+   "search_ssid": "6df46566dce6568d62381ede4c7f40be",
+   "search_vsid": "6df46566dce6568d62381ede4c7f40be",
+   "can_shared": 1,
+   "page_size": 5,
+   "cardlist_head_cards": [
+    {
+     "head_type_name": "channel_list",
+     "channel_list": [
+      "综合",
+      "实时",
+      "用户",
+      "图片",
+      "视频",
+      "关注",
+      "热门",
+      "话题",
+      "超话",
+      "地点",
+      "商品"
+     ]
+    }
+   ],
+   "show_style": 1,
+   "shared_text": "快来搜索看看http://s.weibo.com/weibo/%E6%96%B0%E5%8D%8E%E7%A4%BE",
+   "share_containerid": "230958type%3D1%26q%3D%25E6%2596%25B0%25E5%258D%258E%25E7%25A4%25BE",
+   "cardlist_title": "新华社",
+   "desc": "",
+   "portrait": "http://h5.sinaimg.cn/upload/2016/07/29/557/link.png",
+   "shared_text_qrcode": "",
+   "share_content": {
+    "custom_share_path": "http://s.weibo.com/weibo?q=%E6%96%B0%E5%8D%8E%E7%A4%BE",
+    "description": "实时资讯，海量讨论",
+    "icon": "http://h5.sinaimg.cn/upload/2016/07/29/557/link.png"
+   },
+   "page": 2
+  },
+  "cards": [
+   {
+    "card_type": 9,
+    "anchorId": "seqid:1473019655|type:61|t:0|pos:1-0-0|q:新华社|srid:6df46566dce6568d62381ede4c7f40be|search_ssid:6df46566dce6568d62381ede4…",
+    "display_followbtn": false,
+    "mblog": {
+     "id": "5364365324191250",
+     "bid": "Rr0r2hAkO",
+     "text": "【<a  href=\"https://m.weibo.cn/search?containerid=231522type%3D1%26t%3D10%26q%3D%",
+     "user": {
+      "screen_name": "活力玉泉"
+     },
+     "pic_ids_n": 1,
+     "page_info": {
+      "type": "search_topic",
+      "object_type": 0
+     },
+     "isLongText": true
+    },
+    "itemid": "seqid:1473019655|type:61|t:0|pos:1-0-0|q:新华社|srid:6df46566dce6568d62381ede4c7f40be|search_ssid:6df46566dce6568d62381ede4…",
+    "cate_id": "31",
+    "display_arrow": 0,
+    "show_type": 1,
+    "scheme": "https://m.weibo.cn/status/Rr0r2hAkO?mblogid=Rr0r2hAkO&launchid=10000360-page_H5",
+    "container_color": "#EEEEEE",
+    "container_color_dark": "#151515"
+   },
+   {
+    "card_type": 9,
+    "anchorId": "seqid:1473019655|type:61|t:0|pos:1-0-1|q:新华社|srid:6df46566dce6568d62381ede4c7f40be|search_ssid:6df46566dce6568d62381ede4…",
+    "display_followbtn": false,
+    "mblog": {
+     "id": "5364365227983039",
+     "bid": "Rr0qSxuKH",
+     "text": "【<a  href=\"https://m.weibo.cn/search?containerid=231522type%3D1%26t%3D10%26q%3D%",
+     "user": {
+      "screen_name": "东营网官方微博"
+     },
+     "pic_ids_n": 0,
+     "page_info": {
+      "type": "video",
+      "object_type": 11
+     },
+     "isLongText": true
+    },
+    "itemid": "seqid:1473019655|type:61|t:0|pos:1-0-1|q:新华社|srid:6df46566dce6568d62381ede4c7f40be|search_ssid:6df46566dce6568d62381ede4…",
+    "cate_id": "31",
+    "display_arrow": 0,
+    "show_type": 1,
+    "scheme": "https://m.weibo.cn/status/Rr0qSxuKH?mblogid=Rr0qSxuKH&launchid=10000360-page_H5",
+    "container_color": "#EEEEEE",
+    "container_color_dark": "#151515"
+   },
+   {
+    "card_type": 9,
+    "anchorId": "seqid:1473019655|type:61|t:0|pos:1-0-0|q:新华社|srid:6df46566dce6568d62381ede4c7f40be|search_ssid:6df46566dce6568d62381ede4…",
+    "display_followbtn": false,
+    "mblog": {
+     "id": "5364365206750645",
+     "bid": "Rr0qQsk9n",
+     "text": "我分享了【新华社分享页】, 快来看吧！| <a  href=\"https://weibo.cn/sinaurl?u=https%3A%2F%2Fh.xinhua",
+     "user": {
+      "screen_name": "焦黄荷包蛋"
+     },
+     "pic_ids_n": 0,
+     "page_info": null,
+     "isLongText": false
+    },
+    "itemid": "seqid:1473019655|type:61|t:0|pos:1-0-0|q:新华社|srid:6df46566dce6568d62381ede4c7f40be|search_ssid:6df46566dce6568d62381ede4…",
+    "cate_id": "31",
+    "display_arrow": 0,
+    "show_type": 1,
+    "scheme": "https://m.weibo.cn/status/Rr0qQsk9n?mblogid=Rr0qQsk9n&launchid=10000360-page_H5",
+    "container_color": "#EEEEEE",
+    "container_color_dark": "#151515"
+   }
+  ],
+  "ext_trans": {
+   "ext_starttime": "1794447821",
+   "cur_offset": "0",
+   "ext_cardsnum": 1,
+   "ext_uniq_seqid": 1,
+   "search_ssid": "6df46566dce6568d62381ede4c7f40be",
+   "search_vsid": "6df46566dce6568d62381ede4c7f40be",
+   "interval_weibo_count": 5,
+   "is_shown_darwin": 1,
+   "interval_darwin_weibo_count": 2
+  },
+  "scheme": "sinaweibo://searchall?containerid=100103&q=%E6%96%B0%E5%8D%8E%E7%A4%BE%26t%3D0&_T_WM=56345069581&v_p=42&lfid=100103&laun…",
+  "showAppTips": 0,
+  "_cards_total_in_response": 5
+ },
+ "_probe": "2026-11-12 visitor-state probe, keyword 新华社, trimmed (full card_type distribution in WEIBO_API.md)"
+}

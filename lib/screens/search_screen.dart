@@ -6,17 +6,21 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/ime.dart';
+import '../core/nav.dart';
 import '../models/models.dart';
 import '../services/weiyue_service.dart';
+import '../widgets/cover_image.dart';
 import '../widgets/responsive_status_list.dart';
 import '../widgets/status_card.dart';
 import '../widgets/user_tile.dart';
 
 /// 搜索（m 端 container 全文搜索，访客态唯一可用的搜索 JSON）。
-/// 综合页一次返回后本地拆分：用户卡来自 card_type=11 分组里的
-/// card_type=10（带 user 对象），微博卡来自顶层 card_type=9 与分组内
-/// card_type=9（带 mblog）；card_type=6 的「更多」链接卡忽略。
-/// 分段用同一份结果本地过滤，不重复请求。
+/// 7 个分类各走自己的 `100103type={N}` 容器（2026-11-12 探针实证）：
+/// 综合 1 / 实时 61 / 用户 3 / 视频 64 / 图片 63 / 话题 38 / 超话 98。
+/// 每分类各自维护结果与分页：首次点开才加载，切换回来不重拉
+/// （IndexedStack 保活，与首页分类保活同一原则）；关键词变化全部重置。
+/// 分页：访客态专属分类第 2 页会被 302 跳登录——翻页失败静默按
+/// 「没有更多」处理；综合保持原行为（只取第一页，不翻页）。
 class SearchScreen extends StatefulWidget {
   final String? initialKeyword;
   final bool autofocus;
@@ -26,20 +30,40 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
+/// 一个分类的独立状态：结果、分页游标与滚动位置都留在自己名下。
+class _CategoryState {
+  List<WbStatus> statuses = [];
+  List<WbUser> users = [];
+  List<WbTopicEntry> topics = [];
+  bool loading = false;
+  bool loadingMore = false;
+  bool loaded = false;
+  bool ended = false;
+  String? error;
+
+  /// 下一页页码（cardlistInfo.page 给出），加载第一页后更新。
+  int nextPage = 2;
+  final ScrollController scroll = ScrollController();
+
+  bool get isEmpty => statuses.isEmpty && users.isEmpty && topics.isEmpty;
+}
+
 class _SearchScreenState extends State<SearchScreen> {
   static const _historyKey = 'weiyue_search_history';
   static const _historyLimit = 12;
 
   late final _controller = TextEditingController(text: widget.initialKeyword);
   final _searchFocus = FocusNode();
-  SearchResult? _result;
-  bool _loading = false;
-  String? _error;
+  bool _hasSearched = false;
   String _keyword = '';
-  int _segment = 0; // 0 综合 1 用户 2 微博
+  SearchCategory _category = SearchCategory.all;
+  final Map<SearchCategory, _CategoryState> _states = {};
+  final Set<SearchCategory> _visited = {};
   List<String> _history = const [];
   Timer? _suggestDebounce;
   SearchSuggest? _suggest;
+
+  WeiyueService get _svc => context.read<WeiyueService>();
 
   @override
   void initState() {
@@ -60,6 +84,9 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void dispose() {
     _suggestDebounce?.cancel();
+    for (final st in _states.values) {
+      st.scroll.dispose();
+    }
     _searchFocus.dispose();
     _controller.dispose();
     super.dispose();
@@ -81,9 +108,9 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _fetchSuggest(String q) async {
     try {
-      final s = await context.read<WeiyueService>().getSearchSuggest(q);
+      final s = await _svc.getSearchSuggest(q);
       // 输入已变化/已提交搜索则丢弃这次结果，避免旧建议闪现
-      if (!mounted || _controller.text.trim() != q || _result != null) return;
+      if (!mounted || _controller.text.trim() != q || _hasSearched) return;
       setState(() => _suggest = s);
     } catch (_) {
       // 建议失败不打扰：保持历史/提示区
@@ -142,25 +169,112 @@ class _SearchScreenState extends State<SearchScreen> {
     _recordHistory(keyword);
     _suggestDebounce?.cancel();
     FocusScope.of(context).unfocus();
+    // 关键词变化：全部清类状态从零开始
+    for (final st in _states.values) {
+      st.scroll.dispose();
+    }
     setState(() {
-      _loading = true;
-      _error = null;
+      _states.clear();
+      _visited
+        ..clear()
+        ..add(SearchCategory.all);
       _keyword = keyword;
-      _segment = 0;
+      _category = SearchCategory.all;
+      _hasSearched = true;
       _suggest = null;
     });
+    await _loadCategory(SearchCategory.all);
+  }
+
+  _CategoryState _stateFor(SearchCategory cat) {
+    return _states.putIfAbsent(cat, () {
+      final st = _CategoryState();
+      st.scroll.addListener(() {
+        if (st.scroll.hasClients &&
+            st.scroll.position.pixels >=
+                st.scroll.position.maxScrollExtent - 500) {
+          _loadMore(cat);
+        }
+      });
+      return st;
+    });
+  }
+
+  void _selectCategory(SearchCategory cat) {
+    if (_category == cat) return;
+    setState(() {
+      _category = cat;
+      _visited.add(cat);
+    });
+    _loadCategory(cat);
+  }
+
+  Future<void> _loadCategory(SearchCategory cat) async {
+    final st = _stateFor(cat);
+    if (st.loaded || st.loading) return;
+    setState(() {
+      st.loading = true;
+      st.error = null;
+    });
     try {
-      final result = await context.read<WeiyueService>().search(keyword);
+      final page = await _svc.searchCategory(_keyword, cat, page: 1);
       if (!mounted) return;
       setState(() {
-        _result = result;
-        _loading = false;
+        st.statuses = page.statuses;
+        st.users = page.users;
+        st.topics = page.topics;
+        st.nextPage = page.nextPage;
+        // 综合保持原行为不翻页；其余分类没有下一页序号即到底
+        st.ended = cat == SearchCategory.all || page.nextPage <= 0;
+        st.loaded = true;
+        st.loading = false;
       });
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = '$e';
-          _loading = false;
+          st.error = '$e';
+          st.loading = false;
+        });
+      }
+    }
+  }
+
+  /// 翻页：失败（访客态 302 跳登录等）静默按没有更多处理，
+  /// 不报错、不清已有列表；成功则按状态 id 去重追加。
+  Future<void> _loadMore(SearchCategory cat) async {
+    final st = _states[cat];
+    if (st == null || !st.loaded || st.loading || st.loadingMore || st.ended) {
+      return;
+    }
+    st.loadingMore = true;
+    setState(() {});
+    try {
+      final page = await _svc.searchCategory(_keyword, cat, page: st.nextPage);
+      if (!mounted) return;
+      setState(() {
+        final seen = st.statuses.map((s) => s.id).toSet();
+        st.statuses = [
+          ...st.statuses,
+          for (final s in page.statuses)
+            if (seen.add(s.id)) s,
+        ];
+        final seenUsers = st.users.map((u) => u.id).toSet();
+        st.users = [
+          ...st.users,
+          for (final u in page.users)
+            if (seenUsers.add(u.id)) u,
+        ];
+        st.topics = [...st.topics, ...page.topics];
+        st.nextPage = page.nextPage;
+        st.ended = page.nextPage <= 0 ||
+            (page.statuses.isEmpty && page.users.isEmpty && page.topics.isEmpty);
+        st.loadingMore = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          st.ended = true;
+          st.loadingMore = false;
         });
       }
     }
@@ -168,7 +282,6 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
@@ -194,50 +307,39 @@ class _SearchScreenState extends State<SearchScreen> {
       ),
       body: Column(
         children: [
-          if (_result != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: SegmentedButton<int>(
-                segments: const [
-                  ButtonSegment(value: 0, label: Text('综合')),
-                  ButtonSegment(value: 1, label: Text('用户')),
-                  ButtonSegment(value: 2, label: Text('动态')),
-                ],
-                selected: {_segment},
-                onSelectionChanged: (s) => setState(() => _segment = s.first),
-                style: ButtonStyle(
-                  visualDensity: VisualDensity.compact,
-                  textStyle: WidgetStatePropertyAll(
-                    TextStyle(color: cs.onSurface, fontSize: 13),
-                  ),
-                ),
-              ),
-            ),
+          if (_hasSearched) _buildCategoryBar(),
           Expanded(child: _buildBody()),
         ],
       ),
     );
   }
 
-  Widget _buildBody() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_error!, textAlign: TextAlign.center),
-            const SizedBox(height: 8),
-            FilledButton(
-              onPressed: () => _doSearch(_keyword),
-              child: const Text('重试'),
+  /// 顶部分类栏：7 项横滑 chips。
+  Widget _buildCategoryBar() {
+    return SizedBox(
+      height: 46,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        children: [
+          for (final cat in SearchCategory.values)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(cat.label),
+                selected: _category == cat,
+                onSelected: (_) => _selectCategory(cat),
+                visualDensity: VisualDensity.compact,
+                labelStyle: const TextStyle(fontSize: 13),
+              ),
             ),
-          ],
-        ),
-      );
-    }
-    final result = _result;
-    if (result == null) {
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (!_hasSearched) {
       // 有输入且建议非空 → 建议列表；否则（空输入/无建议）→ 历史区
       final suggest = _suggest;
       if (_controller.text.trim().isNotEmpty &&
@@ -247,31 +349,86 @@ class _SearchScreenState extends State<SearchScreen> {
       }
       return _buildHistoryOrHint();
     }
-    final showUsers = _segment != 2;
-    final showStatuses = _segment != 1;
-    final users = showUsers ? result.users : const <WbUser>[];
-    final statuses = showStatuses ? result.statuses : const <WbStatus>[];
-    if (users.isEmpty && statuses.isEmpty) {
+    final cats = SearchCategory.values;
+    return IndexedStack(
+      index: cats.indexOf(_category),
+      children: [
+        for (final cat in cats)
+          if (_visited.contains(cat))
+            _buildCategoryView(cat)
+          else
+            const SizedBox.shrink(),
+      ],
+    );
+  }
+
+  Widget _buildCategoryView(SearchCategory cat) {
+    final st = _stateFor(cat);
+    if (st.loading) return const Center(child: CircularProgressIndicator());
+    if (st.error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(st.error!, textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            FilledButton(
+              onPressed: () {
+                st.loaded = false;
+                _loadCategory(cat);
+              },
+              child: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+    }
+    if (!st.loaded || st.isEmpty) {
       return const Center(child: Text('没有找到相关结果'));
     }
-    // 窄屏：用户行 + 帖子卡单列；宽屏：用户行整行置顶，
-    // 帖子卡走瀑布流多列（列数与其它列表共用 feedColumnCount）。
+    return switch (cat) {
+      SearchCategory.users => ListView.builder(
+          controller: st.scroll,
+          itemCount: st.users.length + (st.loadingMore ? 1 : 0),
+          itemBuilder: (context, i) => i < st.users.length
+              ? UserTile(user: st.users[i])
+              : const _LoadingMoreFooter(),
+        ),
+      SearchCategory.topic || SearchCategory.supertopic =>
+        ListView.builder(
+          controller: st.scroll,
+          itemCount: st.topics.length + (st.loadingMore ? 1 : 0),
+          itemBuilder: (context, i) => i < st.topics.length
+              ? _TopicRow(entry: st.topics[i])
+              : const _LoadingMoreFooter(),
+        ),
+      _ => _buildStatusResults(cat, st),
+    };
+  }
+
+  /// 微博卡结果（综合带用户行置顶；实时/视频/图片只有微博卡）。
+  /// 窄屏单列，宽屏用户行整行置顶 + 帖子卡瀑布流多列。
+  Widget _buildStatusResults(SearchCategory cat, _CategoryState st) {
+    final users = cat == SearchCategory.all ? st.users : const <WbUser>[];
     return LayoutBuilder(
       builder: (context, constraints) {
         final cols = feedColumnCount(constraints.maxWidth);
         if (cols <= 1) {
           return ListView(
+            controller: st.scroll,
             children: [
               for (final u in users) UserTile(user: u),
-              for (final s in statuses)
+              for (final s in st.statuses)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
                   child: StatusCard(status: s),
                 ),
+              if (st.loadingMore) const _LoadingMoreFooter(),
             ],
           );
         }
         return CustomScrollView(
+          controller: st.scroll,
           slivers: [
             SliverList.builder(
               itemCount: users.length,
@@ -283,10 +440,12 @@ class _SearchScreenState extends State<SearchScreen> {
                 crossAxisCount: cols,
                 mainAxisSpacing: 10,
                 crossAxisSpacing: 10,
-                childCount: statuses.length,
-                itemBuilder: (context, i) => StatusCard(status: statuses[i]),
+                childCount: st.statuses.length,
+                itemBuilder: (context, i) => StatusCard(status: st.statuses[i]),
               ),
             ),
+            if (st.loadingMore)
+              const SliverToBoxAdapter(child: _LoadingMoreFooter()),
           ],
         );
       },
@@ -365,6 +524,72 @@ class _SearchScreenState extends State<SearchScreen> {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// 话题 / 超话行：封面 + 标题 + 简介/统计文案，点击进话题页
+///（与正文话题点击同一条 openTopic 路）。
+class _TopicRow extends StatelessWidget {
+  final WbTopicEntry entry;
+  const _TopicRow({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final name = entry.title.replaceAll(RegExp(r'^#+|#+$'), '').trim();
+    return ListTile(
+      leading: CoverImage(
+        url: entry.pic,
+        size: 48,
+        radius: 8,
+        fallbackIcon: Icons.tag,
+      ),
+      title: Text(
+        entry.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.w600),
+      ),
+      subtitle: (entry.desc1.isEmpty && entry.desc2.isEmpty)
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (entry.desc1.isNotEmpty && entry.desc1 != name)
+                  Text(
+                    entry.desc1,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                if (entry.desc2.isNotEmpty)
+                  Text(
+                    entry.desc2,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                  ),
+              ],
+            ),
+      onTap: () => openTopic(context, entry.title),
+    );
+  }
+}
+
+class _LoadingMoreFooter extends StatelessWidget {
+  const _LoadingMoreFooter();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 16),
+      child: Center(
+        child: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
     );
   }
 }

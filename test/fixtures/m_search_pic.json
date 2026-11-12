@@ -1,0 +1,142 @@
+{
+ "ok": 1,
+ "data": {
+  "cardlistInfo": {
+   "is_first_level": 1,
+   "v_p": "42",
+   "containerid": "100103type=63&q=新华社&t=0",
+   "total": 912,
+   "starttime": 1794447851,
+   "search_request_id": "dfdeb6869eb450a412e515f4265f5569",
+   "search_ssid": "dfdeb6869eb450a412e515f4265f5569",
+   "search_vsid": "dfdeb6869eb450a412e515f4265f5569",
+   "can_shared": 1,
+   "page_size": 5,
+   "title_top": "新华社",
+   "cardlist_head_cards": [
+    {
+     "head_type_name": "channel_list",
+     "channel_list": [
+      "综合",
+      "实时",
+      "用户",
+      "图片",
+      "视频",
+      "关注",
+      "热门",
+      "话题",
+      "超话",
+      "地点",
+      "商品"
+     ]
+    }
+   ],
+   "common_hide_type": {
+    "1022:100808b9fedef28ddcf151d85c04b905c0ad5c": 1,
+    "1022:10080865752c256780c76640eaaebffbdd66f6": 1
+   },
+   "show_style": 1,
+   "shared_text": "快来搜索看看http://s.weibo.com/weibo/%E6%96%B0%E5%8D%8E%E7%A4%BE",
+   "share_containerid": "230958type%3D1%26q%3D%25E6%2596%25B0%25E5%258D%258E%25E7%25A4%25BE",
+   "cardlist_title": "新华社",
+   "desc": "",
+   "portrait": "http://h5.sinaimg.cn/upload/2016/07/29/557/link.png",
+   "shared_text_qrcode": "",
+   "share_content": {
+    "custom_share_path": "http://s.weibo.com/weibo?q=%E6%96%B0%E5%8D%8E%E7%A4%BE",
+    "description": "实时资讯，海量讨论",
+    "icon": "http://h5.sinaimg.cn/upload/2016/07/29/557/link.png"
+   },
+   "page": 2
+  },
+  "cards": [
+   {
+    "card_type": 9,
+    "anchorId": "seqid:2136677126|type:63|t:0|pos:1-0-0|q:新华社|srid:dfdeb6869eb450a412e515f4265f5569|search_ssid:dfdeb6869eb450a412e515f42…",
+    "display_followbtn": false,
+    "mblog": {
+     "id": "5361458876778598",
+     "bid": "RpMPdsrqe",
+     "text": "<a  href=\"https://m.weibo.cn/search?containerid=231522type%3D1%26t%3D10%26q%3D%2",
+     "user": {
+      "screen_name": "新华社"
+     },
+     "pic_ids_n": 9,
+     "page_info": {
+      "type": "search_topic",
+      "object_type": 0
+     },
+     "isLongText": false
+    },
+    "itemid": "seqid:2136677126|type:63|t:0|pos:1-0-0|q:新华社|srid:dfdeb6869eb450a412e515f4265f5569|search_ssid:dfdeb6869eb450a412e515f42…",
+    "cate_id": "516",
+    "display_arrow": 0,
+    "show_type": 1,
+    "scheme": "https://m.weibo.cn/status/RpMPdsrqe?mblogid=RpMPdsrqe&launchid=10000360-page_H5",
+    "container_color": "#EEEEEE",
+    "container_color_dark": "#151515"
+   },
+   {
+    "card_type": 9,
+    "anchorId": "seqid:2136677126|type:63|t:0|pos:1-0-1|q:新华社|srid:dfdeb6869eb450a412e515f4265f5569|search_ssid:dfdeb6869eb450a412e515f42…",
+    "display_followbtn": false,
+    "mblog": {
+     "id": "5356733830529783",
+     "bid": "RnNUb2dOT",
+     "text": "【谷神星一号成功发射】<a  href=\"https://m.weibo.cn/search?containerid=231522type%3D1%26t%3D",
+     "user": {
+      "screen_name": "沂蒙山上一匹狼"
+     },
+     "pic_ids_n": 1,
+     "page_info": {
+      "type": "search_topic",
+      "object_type": 0
+     },
+     "isLongText": false
+    },
+    "itemid": "seqid:2136677126|type:63|t:0|pos:1-0-1|q:新华社|srid:dfdeb6869eb450a412e515f4265f5569|search_ssid:dfdeb6869eb450a412e515f42…",
+    "cate_id": "516",
+    "display_arrow": 0,
+    "show_type": 1,
+    "scheme": "https://m.weibo.cn/status/RnNUb2dOT?mblogid=RnNUb2dOT&launchid=10000360-page_H5",
+    "container_color": "#EEEEEE",
+    "container_color_dark": "#151515"
+   },
+   {
+    "card_type": 9,
+    "anchorId": "seqid:2136677126|type:63|t:0|pos:1-0-2|q:新华社|srid:dfdeb6869eb450a412e515f4265f5569|search_ssid:dfdeb6869eb450a412e515f42…",
+    "display_followbtn": false,
+    "mblog": {
+     "id": "5354242702574000",
+     "bid": "RmL6eaNC8",
+     "text": "<a  href=\"https://m.weibo.cn/search?containerid=231522type%3D1%26t%3D10%26q%3D%2",
+     "user": {
+      "screen_name": "中国残联"
+     },
+     "pic_ids_n": 4,
+     "page_info": {
+      "type": "search_topic",
+      "object_type": 0
+     },
+     "isLongText": false
+    },
+    "itemid": "seqid:2136677126|type:63|t:0|pos:1-0-2|q:新华社|srid:dfdeb6869eb450a412e515f4265f5569|search_ssid:dfdeb6869eb450a412e515f42…",
+    "cate_id": "516",
+    "display_arrow": 0,
+    "show_type": 1,
+    "scheme": "https://m.weibo.cn/status/RmL6eaNC8?mblogid=RmL6eaNC8&launchid=10000360-page_H5",
+    "container_color": "#EEEEEE",
+    "container_color_dark": "#151515"
+   }
+  ],
+  "ext_trans": {
+   "search_ssid": "dfdeb6869eb450a412e515f4265f5569",
+   "search_vsid": "dfdeb6869eb450a412e515f4265f5569",
+   "interval_weibo_count": 51
+  },
+  "scheme": "sinaweibo://searchall?containerid=100103&q=%E6%96%B0%E5%8D%8E%E7%A4%BE%26t%3D0&_T_WM=53178010308&v_p=42&lfid=100103&laun…",
+  "showAppTips": 0,
+  "_cards_total_in_response": 51
+ },
+ "_probe": "2026-11-12 visitor-state probe, keyword 新华社, trimmed (full card_type distribution in WEIBO_API.md)"
+}

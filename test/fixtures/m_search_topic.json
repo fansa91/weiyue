@@ -1,0 +1,86 @@
+{
+ "ok": 1,
+ "data": {
+  "cardlistInfo": {
+   "is_first_level": 1,
+   "v_p": "42",
+   "containerid": "100103type=38&q=新华社&t=0",
+   "total": 500,
+   "starttime": 1794447840,
+   "search_request_id": "cb80b133c497a339f9779c7cb70cf82d",
+   "search_ssid": "cb80b133c497a339f9779c7cb70cf82d",
+   "search_vsid": "cb80b133c497a339f9779c7cb70cf82d",
+   "can_shared": 1,
+   "page_size": 5,
+   "title_top": "-新华社",
+   "cardlist_head_cards": [
+    {
+     "head_type_name": "channel_list",
+     "channel_list": [
+      "综合",
+      "实时",
+      "用户",
+      "图片",
+      "视频",
+      "关注",
+      "热门",
+      "话题",
+      "超话",
+      "地点",
+      "商品"
+     ]
+    }
+   ],
+   "show_style": 1,
+   "shared_text": "快来搜索看看http://s.weibo.com/weibo/%E6%96%B0%E5%8D%8E%E7%A4%BE",
+   "share_containerid": "230958type%3D1%26q%3D%25E6%2596%25B0%25E5%258D%258E%25E7%25A4%25BE",
+   "cardlist_title": "新华社",
+   "desc": "",
+   "portrait": "http://h5.sinaimg.cn/upload/2016/07/29/557/link.png",
+   "shared_text_qrcode": "",
+   "share_content": {
+    "custom_share_path": "http://s.weibo.com/weibo?q=%E6%96%B0%E5%8D%8E%E7%A4%BE",
+    "description": "实时资讯，海量讨论",
+    "icon": "http://h5.sinaimg.cn/upload/2016/07/29/557/link.png"
+   },
+   "page": 2
+  },
+  "cards": [
+   {
+    "card_type": 11,
+    "card_group": [
+     {
+      "card_type": 8,
+      "anchorId": "seqid:487563182|type:38|t:0|pos:1-0-0|q:新华社|srid:cb80b133c497a339f9779c7cb70cf82d|search_ssid:cb80b133c497a339f9779c7cb7…",
+      "itemid": "seqid:487563182|type:38|t:0|pos:1-0-0|q:新华社|srid:cb80b133c497a339f9779c7cb70cf82d|search_ssid:cb80b133c497a339f9779c7cb7…",
+      "title_sub": "#新华社专访句号无言#",
+      "pic": "https://wx4.sinaimg.cn/large/006H9qpAly8iiwy4l6uuaj30u00u0ta9.jpg",
+      "desc1": "新华社专访句号无言",
+      "desc2": "1.1万讨论 348.6万阅读",
+      "scheme": "https://m.weibo.cn/search?containerid=231522type%3D1%26t%3D10%26q%3D%23%E6%96%B0%E5%8D%8E%E7%A4%BE%E4%B8%93%E8%AE%BF%E5%…"
+     },
+     {
+      "card_type": 8,
+      "anchorId": "seqid:487563182|type:38|t:0|pos:1-0-1|q:新华社|srid:cb80b133c497a339f9779c7cb70cf82d|search_ssid:cb80b133c497a339f9779c7cb7…",
+      "itemid": "seqid:487563182|type:38|t:0|pos:1-0-1|q:新华社|srid:cb80b133c497a339f9779c7cb70cf82d|search_ssid:cb80b133c497a339f9779c7cb7…",
+      "title_sub": "#新华社夜读#",
+      "pic": "https://wx1.sinaimg.cn/large/001R0E0aly8hq92t8ghl3j60dw0dwaat02.jpg",
+      "desc1": "每晚锁定@新华社 ，和小编一起相约夜读，评论区里互道晚安！",
+      "desc2": "5.9万讨论 9341.9万阅读",
+      "scheme": "https://m.weibo.cn/search?containerid=231522type%3D1%26t%3D10%26q%3D%23%E6%96%B0%E5%8D%8E%E7%A4%BE%E5%A4%9C%E8%AF%BB%23&…"
+     }
+    ],
+    "_card_group_total": 9,
+    "show_type": 0
+   }
+  ],
+  "ext_trans": {
+   "search_ssid": "cb80b133c497a339f9779c7cb70cf82d",
+   "search_vsid": "cb80b133c497a339f9779c7cb70cf82d"
+  },
+  "scheme": "sinaweibo://searchall?containerid=100103&q=%E6%96%B0%E5%8D%8E%E7%A4%BE%26t%3D0&_T_WM=70059464858&v_p=42&lfid=100103&laun…",
+  "showAppTips": 0,
+  "_cards_total_in_response": 1
+ },
+ "_probe": "2026-11-12 visitor-state probe, keyword 新华社, trimmed (full card_type distribution in WEIBO_API.md)"
+}

@@ -1,0 +1,82 @@
+{
+ "ok": 1,
+ "data": {
+  "cardlistInfo": {
+   "is_first_level": 1,
+   "v_p": "42",
+   "containerid": "100103type=98&q=新华社&t=0",
+   "total": 5,
+   "starttime": 1794447857,
+   "search_request_id": "53182cc999330267e63ec4c9bb8e03e2",
+   "search_ssid": "53182cc999330267e63ec4c9bb8e03e2",
+   "search_vsid": "53182cc999330267e63ec4c9bb8e03e2",
+   "can_shared": 1,
+   "page_size": 5,
+   "title_top": "-新华社",
+   "cardlist_head_cards": [
+    {
+     "head_type_name": "channel_list",
+     "channel_list": [
+      "综合",
+      "实时",
+      "用户",
+      "图片",
+      "视频",
+      "关注",
+      "热门",
+      "话题",
+      "超话",
+      "地点",
+      "商品"
+     ]
+    }
+   ],
+   "show_style": 1,
+   "shared_text": "快来搜索看看http://s.weibo.com/weibo/%E6%96%B0%E5%8D%8E%E7%A4%BE",
+   "share_containerid": "230958type%3D1%26q%3D%25E6%2596%25B0%25E5%258D%258E%25E7%25A4%25BE",
+   "cardlist_title": "新华社",
+   "desc": "",
+   "portrait": "http://h5.sinaimg.cn/upload/2016/07/29/557/link.png",
+   "shared_text_qrcode": "",
+   "share_content": {
+    "custom_share_path": "http://s.weibo.com/weibo?q=%E6%96%B0%E5%8D%8E%E7%A4%BE",
+    "description": "实时资讯，海量讨论",
+    "icon": "http://h5.sinaimg.cn/upload/2016/07/29/557/link.png"
+   },
+   "page": null
+  },
+  "cards": [
+   {
+    "card_type": 11,
+    "card_group": [
+     {
+      "card_type": 8,
+      "title_sub": "新华社皇亭子宿舍",
+      "pic": "https://wx1.sinaimg.cn/thumbnail/a50b0fd1ly8h4vv503c6oj2070070wei.jpg",
+      "desc1": "",
+      "desc2": "1帖子 14粉丝",
+      "scheme": "https://m.weibo.cn/p/index?extparam=%E6%96%B0%E5%8D%8E%E7%A4%BE%E7%9A%87%E4%BA%AD%E5%AD%90%E5%AE%BF%E8%88%8D&containerid…"
+     },
+     {
+      "card_type": 8,
+      "title_sub": "新华社宿舍",
+      "pic": "https://wx1.sinaimg.cn/thumbnail/a50b0fd1ly8h4vv503c6oj2070070wei.jpg",
+      "desc1": "",
+      "desc2": "6帖子 20粉丝",
+      "scheme": "https://m.weibo.cn/p/index?extparam=%E6%96%B0%E5%8D%8E%E7%A4%BE%E5%AE%BF%E8%88%8D&containerid=1008085f15b748da6f3b0faa53…"
+     }
+    ],
+    "_card_group_total": 5,
+    "show_type": 0
+   }
+  ],
+  "ext_trans": {
+   "search_ssid": "53182cc999330267e63ec4c9bb8e03e2",
+   "search_vsid": "53182cc999330267e63ec4c9bb8e03e2"
+  },
+  "scheme": "sinaweibo://searchall?containerid=100103&q=%E6%96%B0%E5%8D%8E%E7%A4%BE%26t%3D0&_T_WM=97336822299&v_p=42&lfid=100103&laun…",
+  "showAppTips": 0,
+  "_cards_total_in_response": 1
+ },
+ "_probe": "2026-11-12 visitor-state probe, keyword 新华社, trimmed (full card_type distribution in WEIBO_API.md)"
+}
