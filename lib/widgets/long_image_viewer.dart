@@ -5,6 +5,7 @@ import '../core/long_image.dart';
 import '../core/quality.dart';
 import '../models/models.dart';
 import 'download_button.dart';
+import 'live_photo_view.dart';
 import 'network_image.dart';
 import 'photo_gallery.dart';
 import 'viewer_nav.dart';
@@ -17,6 +18,9 @@ import 'viewer_nav.dart';
 /// - 多图帖点中普通/未知图 → 原图库 [PhotoGalleryScreen]（左右滑 + 缩放）。
 /// - [allowLongImage] 为 false 时（帖级长图准入收口判定不通过，如帖子
 ///   本级或转发原帖含视频/直播）一律走普通图库，绝不进长图阅读器。
+/// 阅读器的缩放态与图库单页同效：下滑滑出退出、实况照片可播放，
+/// 单图帖点开与多图帖点开的预览体验一致（长图滚动阅读态除外，
+/// 那是阅读器独有模式）。
 void openPicViewer(
   BuildContext context,
   List<WbPic> pics,
@@ -53,7 +57,11 @@ void openPicViewer(
 /// - 尺寸未知：先按缩放模式占位，解析出是长图后自动切滚动阅读
 ///   （用户已手动切换过模式的图不自动改）。
 ///
-/// 上一张/下一张按钮在 AppBar 右侧，长图模式内可逐张翻看整组图。
+/// 上一张/下一张按钮在 AppBar 右侧（仅多图），长图模式内可逐张翻看整组图。
+///
+/// 缩放态与图库对齐：包 ExtendedImageSlidePage 支持下滑滑出退出，
+/// 实况照片走 LivePhotoView（长按/悬停/点 LIVE 标识播放）；
+/// 滚动阅读态是整页滚动，不参与滑出。
 class LongImageReader extends StatefulWidget {
   final List<WbPic> pics;
   final int initialIndex;
@@ -61,11 +69,15 @@ class LongImageReader extends StatefulWidget {
   /// 查看用图档位：默认标准（长图查看原图，省流量档降为中图）。
   final ImageQualityPref imageQuality;
 
+  /// 实况照片播放后端工厂（测试缝）；null 时用 media_kit 真实后端。
+  final LivePlaybackFactory? livePlaybackFactory;
+
   const LongImageReader({
     super.key,
     required this.pics,
     this.initialIndex = 0,
     this.imageQuality = ImageQualityPref.standard,
+    this.livePlaybackFactory,
   });
 
   @override
@@ -146,6 +158,24 @@ class _LongImageReaderState extends State<LongImageReader> {
     setState(() => _scrollOverride[_index] = !_scrollMode);
   }
 
+  /// 缩放态下滑滑出退出（与图库同配置：纵向滑出、黑底随偏移渐隐）：
+  /// 包一层 ExtendedImageSlidePage 承接缩放图的滑出；滚动阅读态不包
+  /// （整页滚动与滑出手势冲突，且长图本就靠滚动看全）。
+  Widget _withSlideOut({required bool enabled, required Widget child}) {
+    if (!enabled) return child;
+    return ExtendedImageSlidePage(
+      slideAxis: SlideAxis.vertical,
+      slidePageBackgroundHandler: (offset, pageSize) =>
+          defaultSlidePageBackgroundHandler(
+            offset: offset,
+            pageSize: pageSize,
+            color: Colors.black,
+            pageGestureAxis: SlideAxis.vertical,
+          ),
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final pic = _pic;
@@ -165,18 +195,21 @@ class _LongImageReaderState extends State<LongImageReader> {
               )
             : (isLong ? const Text('长图') : null),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.chevron_left),
-            tooltip: '上一张',
-            onPressed: _index > 0 ? () => _goTo(_index - 1) : null,
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right),
-            tooltip: '下一张',
-            onPressed: _index < widget.pics.length - 1
-                ? () => _goTo(_index + 1)
-                : null,
-          ),
+          // 翻页箭头仅多图（单图时与图库一致，AppBar 不放禁用态箭头）。
+          if (multi) ...[
+            IconButton(
+              icon: const Icon(Icons.chevron_left),
+              tooltip: '上一张',
+              onPressed: _index > 0 ? () => _goTo(_index - 1) : null,
+            ),
+            IconButton(
+              icon: const Icon(Icons.chevron_right),
+              tooltip: '下一张',
+              onPressed: _index < widget.pics.length - 1
+                  ? () => _goTo(_index + 1)
+                  : null,
+            ),
+          ],
           PicDownloadButton(
             pic: pic,
             baseName: 'weiyue_${pic.pid.isNotEmpty ? pic.pid : 'img$_index'}',
@@ -202,7 +235,9 @@ class _LongImageReaderState extends State<LongImageReader> {
         onNext: () => _goTo(_index + 1),
         // 与图库统一：桌面端 Esc 关闭（共用快捷键组件顺带生效）。
         onClose: () => Navigator.of(context).pop(),
-        child: Stack(
+        child: _withSlideOut(
+          enabled: !_scrollMode,
+          child: Stack(
           children: [
             _scrollMode ? _buildScrollBody(pic) : _buildZoomBody(pic),
             // 桌面/宽屏：查看区两侧上一张/下一张按钮（与图库统一；
@@ -245,6 +280,7 @@ class _LongImageReaderState extends State<LongImageReader> {
               ),
             ),
           ],
+          ),
         ),
       ),
     );
@@ -288,12 +324,25 @@ class _LongImageReaderState extends State<LongImageReader> {
     );
   }
 
-  /// 缩放细看：与图库单页一致的手势模式 ExtendedImage，
-  /// 双击切回滚动阅读（与 AppBar 按钮同效）。
+  /// 缩放细看：与图库单页一致的手势模式 ExtendedImage（下滑滑出已开，
+  /// 由 build 的 ExtendedImageSlidePage 承接），双击切回滚动阅读
+  /// （与 AppBar 按钮同效）。实况照片走 LivePhotoView，与图库同效：
+  /// 长按/悬停/点 LIVE 标识播放动态部分。
   Widget _buildZoomBody(WbPic pic) {
+    if (pic.isLivePhoto) {
+      return LivePhotoView(
+        key: const ValueKey('long-image-zoom'),
+        pic: pic,
+        imageUrl: pic.longViewerUrl(widget.imageQuality),
+        active: true,
+        inPageView: false,
+        playbackFactory: widget.livePlaybackFactory,
+      );
+    }
     return GestureImage(
       key: const ValueKey('long-image-zoom'),
       url: pic.longViewerUrl(widget.imageQuality),
+      enableSlideOutPage: true,
       onDoubleTap: (_) => _toggleMode(),
     );
   }

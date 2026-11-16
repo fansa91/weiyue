@@ -324,6 +324,35 @@ void main() {
     });
   });
 
+  testWidgets('预加载：成为当前页即后台打开主地址待命（不播放、不上层），点标识直接续播不重复打开',
+      (tester) async {
+    final fake = FakeLivePlayback();
+    await mockNetworkImagesFor(() async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LivePhotoView(
+            pic: _livePic,
+            imageUrl: _livePic.large,
+            playbackFactory: () => fake,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      // 预加载已打开主地址，但没播放、视频层不上（静图照常显示）
+      expect(fake.openedUrls, [_livePic.liveVideoUrl]);
+      expect(fake.playCount, 0);
+      expect(find.byKey(const ValueKey('fake-live-surface')), findsNothing);
+      // 点标识播放：走预加载续播，不再重复打开地址，视频层直接上
+      await tester.tap(find.byKey(const ValueKey('gallery-live-badge')));
+      await tester.pump();
+      await tester.pump();
+      expect(fake.openedUrls, [_livePic.liveVideoUrl]);
+      expect(fake.playCount, 1);
+      expect(find.byKey(const ValueKey('fake-live-surface')), findsOneWidget);
+    });
+  });
+
   testWidgets('图库滑出配置：纵向 SlidePage 承接、图片开 enableSlideOutPage、背景随偏移渐隐', (
     tester,
   ) async {

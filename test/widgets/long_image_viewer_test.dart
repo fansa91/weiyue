@@ -1,6 +1,8 @@
+import 'package:extended_image_plus/extended_image_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:network_image_mock/network_image_mock.dart';
+import 'package:weiyue/widgets/live_photo_view.dart';
 import 'package:weiyue/widgets/network_image.dart';
 import 'package:weiyue/models/models.dart';
 import 'package:weiyue/widgets/long_image_viewer.dart';
@@ -25,6 +27,17 @@ const _normalPic = WbPic(
   large: 'https://example.com/l2.jpg',
   width: 800,
   height: 600,
+);
+
+const _livePic = WbPic(
+  pid: 'live1',
+  thumbnail: 'https://example.com/t3.jpg',
+  bmiddle: 'https://example.com/m3.jpg',
+  large: 'https://example.com/l3.jpg',
+  original: 'https://example.com/o3.jpg',
+  width: 800,
+  height: 600,
+  liveVideoUrl: 'https://example.com/live.mov',
 );
 
 void main() {
@@ -60,6 +73,49 @@ void main() {
       expect(find.byKey(const ValueKey('long-image-scroll')), findsNothing);
       expect(find.byKey(const ValueKey('long-image-mode-toggle')),
           findsNothing);
+    });
+  });
+
+  testWidgets('长图阅读器：单张普通图缩放态有下滑滑出承接，AppBar 无翻页箭头',
+      (tester) async {
+    await mockNetworkImagesFor(() async {
+      await tester.pumpWidget(const MaterialApp(
+        home: LongImageReader(pics: [_normalPic]),
+      ));
+      await tester.pump();
+      // 与图库单页同效：ExtendedImageSlidePage 承接下滑退出
+      expect(find.byType(ExtendedImageSlidePage), findsOneWidget);
+      // 单图不放禁用态翻页箭头（与图库一致）
+      expect(find.byIcon(Icons.chevron_left), findsNothing);
+      expect(find.byIcon(Icons.chevron_right), findsNothing);
+    });
+  });
+
+  testWidgets('长图阅读器：长图滚动态不包滑出，切缩放态后才有', (tester) async {
+    await mockNetworkImagesFor(() async {
+      await tester.pumpWidget(const MaterialApp(
+        home: LongImageReader(pics: [_longPic]),
+      ));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('long-image-scroll')), findsOneWidget);
+      expect(find.byType(ExtendedImageSlidePage), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('long-image-mode-toggle')));
+      await tester.pump();
+      expect(find.byKey(const ValueKey('long-image-zoom')), findsOneWidget);
+      expect(find.byType(ExtendedImageSlidePage), findsOneWidget);
+    });
+  });
+
+  testWidgets('长图阅读器：单张实况图走 LivePhotoView（带 LIVE 标识）',
+      (tester) async {
+    await mockNetworkImagesFor(() async {
+      await tester.pumpWidget(const MaterialApp(
+        home: LongImageReader(pics: [_livePic]),
+      ));
+      await tester.pump();
+      expect(find.byType(LivePhotoView), findsOneWidget);
+      expect(find.text('LIVE'), findsOneWidget);
+      expect(find.byType(ExtendedImageSlidePage), findsOneWidget);
     });
   });
 

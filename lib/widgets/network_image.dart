@@ -58,8 +58,8 @@ class GestureImage extends StatelessWidget {
   /// 否则缩放后的拖动无法与翻页手势协调。
   final bool inPageView;
 
-  /// 是否启用下滑滑出页面（图库专用）：需祖先有 ExtendedImageSlidePage
-  /// 承接（图库页已包）。长图查看器等其他场景保持 false。
+  /// 是否启用下滑滑出页面：需祖先有 ExtendedImageSlidePage 承接
+  /// （图库页、长图阅读器缩放态均已包）。无承接的场景保持 false。
   final bool enableSlideOutPage;
 
   const GestureImage({

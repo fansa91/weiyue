@@ -85,6 +85,9 @@ class _MediaKitLivePlayback implements LivePlayback {
 /// 播放优先主地址（media/play 包装地址），出错切模型里解出的
 /// .mov 兜底直链再试一次，再失败静默回静图（本页驻留期间不再重试，
 /// 翻页回来可再试）。翻页（[active] 变 false）与组件销毁时释放播放器。
+/// 预加载：成为当前页（[active]）即后台建播放器、打开首个候选并
+/// 暂停待命（首帧已解码），播放意图到来时只 seek 回零 + 播放，
+/// 视频层一盖上就是首帧画面，不再先黑一下才出画。
 class LivePhotoView extends StatefulWidget {
   final WbPic pic;
 
@@ -94,6 +97,10 @@ class LivePhotoView extends StatefulWidget {
   /// 是否为图库当前页。
   final bool active;
 
+  /// 静图是否位于图库翻页视图内（手势协调需与翻页配合时为 true）；
+  /// 长图阅读器等独立单图场景传 false。
+  final bool inPageView;
+
   /// 播放后端工厂（测试缝）；null 时用 media_kit 真实后端。
   final LivePlaybackFactory? playbackFactory;
 
@@ -102,6 +109,7 @@ class LivePhotoView extends StatefulWidget {
     required this.pic,
     required this.imageUrl,
     this.active = true,
+    this.inPageView = true,
     this.playbackFactory,
   });
 
@@ -112,6 +120,11 @@ class LivePhotoView extends StatefulWidget {
 class _LivePhotoViewState extends State<LivePhotoView> {
   LivePlayback? _playback;
   StreamSubscription<String>? _errorSub;
+
+  /// 预加载任务（成为当前页时后台打开候选、暂停待命）；播放意图
+  /// 到来时先等它落定再 seek+play，避免现开现播的首帧黑屏。
+  Future<void>? _preloadTask;
+  bool _preloading = false;
 
   /// 三条播放路径各自的「想播」意图（见类注释），任一为真就应播放。
   bool _longPressing = false;
@@ -144,6 +157,12 @@ class _LivePhotoViewState extends State<LivePhotoView> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _preload();
+  }
+
+  @override
   void didUpdateWidget(covariant LivePhotoView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.pic.pid != widget.pic.pid) {
@@ -158,6 +177,8 @@ class _LivePhotoViewState extends State<LivePhotoView> {
       _dead = false;
       if (mounted) setState(() => _showVideo = false);
     }
+    // 成为当前页（或换了图）：后台预加载，播放时不再现开现等。
+    if (widget.active) _preload();
   }
 
   void _clearIntents() {
@@ -178,6 +199,8 @@ class _LivePhotoViewState extends State<LivePhotoView> {
     _playback?.dispose();
     _playback = null;
     _candidateIndex = -1;
+    _preloadTask = null;
+    _preloading = false;
   }
 
   /// 意图变化后对齐播放状态：有任一意图想播就开播，全部撤掉就停播。
@@ -189,26 +212,55 @@ class _LivePhotoViewState extends State<LivePhotoView> {
     }
   }
 
+  /// 建播放器（工厂）并订阅错误流；已建则复用。原生库不可用等
+  /// 创建失败时标记 _dead 静默保持静图，返回 null。
+  LivePlayback? _ensurePlayback() {
+    var playback = _playback;
+    if (playback != null) return playback;
+    try {
+      playback = (widget.playbackFactory ??
+          _mediaKitLivePlaybackFactory)();
+    } catch (_) {
+      // 原生库不可用等创建失败：静默保持静图
+      _dead = true;
+      return null;
+    }
+    _playback = playback;
+    _errorSub = playback.errorStream.listen((_) => _onPlaybackError());
+    return playback;
+  }
+
+  /// 预加载：后台打开首个候选并暂停待命（open 本身即暂停打开），
+  /// 首帧解码就绪；打开失败的候选由 _openCandidate 自动顺延，
+  /// 全部失败标记 _dead 回静图。不显示视频层、不播放。
+  void _preload() {
+    if (!widget.active || _dead || _candidates.isEmpty) return;
+    if (_playback != null || _preloading) return;
+    _preloading = true;
+    _preloadTask = _openCandidate(0).whenComplete(() {
+      _preloading = false;
+    });
+  }
+
   Future<void> _startPlayback() async {
     if (_starting || _showVideo) return;
     if (!widget.active || _dead || _candidates.isEmpty) return;
     _starting = true;
     try {
-      var playback = _playback;
+      // 先等预加载落定（正在进行时），已预加载好直接走续播路径。
+      final pending = _preloadTask;
+      if (pending != null) await pending;
+      if (!mounted || !_wantPlay || _dead) return;
+      final playback = _playback;
       if (playback == null) {
-        try {
-          playback = (widget.playbackFactory ??
-              _mediaKitLivePlaybackFactory)();
-        } catch (_) {
-          // 原生库不可用等创建失败：静默保持静图
-          _dead = true;
-          return;
-        }
-        _playback = playback;
-        _errorSub = playback.errorStream.listen((_) => _onPlaybackError());
+        // 预加载没建起播放器（工厂失败已标记 _dead）或尚未预加载：
+        // 走现开路径。
+        if (_ensurePlayback() == null) return;
+        await _openCandidate(0);
+        return;
       }
       if (_candidateIndex >= 0) {
-        // 已开播过（停播只是暂停）：从头续播
+        // 已预加载/已开播过（停播只是暂停）：从头续播，首帧现成不黑屏
         await playback.seekToStart();
         if (!mounted || !_wantPlay) return;
         setState(() => _showVideo = true);
@@ -222,7 +274,7 @@ class _LivePhotoViewState extends State<LivePhotoView> {
   }
 
   Future<void> _openCandidate(int index) async {
-    final playback = _playback;
+    final playback = _ensurePlayback();
     if (playback == null) return;
     final urls = _candidates;
     if (index >= urls.length) {
@@ -239,7 +291,8 @@ class _LivePhotoViewState extends State<LivePhotoView> {
       await _openCandidate(index + 1);
       return;
     }
-    if (!mounted) return;
+    // 打开期间被翻页/换图释放过：这路候选作废，不再动界面
+    if (!mounted || !identical(_playback, playback)) return;
     if (_wantPlay) {
       setState(() => _showVideo = true);
       await playback.play();
@@ -247,9 +300,12 @@ class _LivePhotoViewState extends State<LivePhotoView> {
   }
 
   /// 播放中途出错（地址过期/网络失败）：还有候选就切下一个，
-  /// 没有就静默回静图。已无播放意图（停播中）时忽略迟到的错误。
+  /// 没有就静默回静图。无播放意图但已有预加载候选时也顺延候选
+  /// （后台静默换好，下次播放不从坏地址起步）；什么都没加载时
+  /// 忽略迟到的错误。
   void _onPlaybackError() {
-    if (!mounted || !_wantPlay || _dead) return;
+    if (!mounted || _dead) return;
+    if (!_wantPlay && _candidateIndex < 0) return;
     unawaited(_openCandidate(_candidateIndex + 1));
   }
 
@@ -348,7 +404,7 @@ class _LivePhotoViewState extends State<LivePhotoView> {
           children: [
             GestureImage(
               url: widget.imageUrl,
-              inPageView: true,
+              inPageView: widget.inPageView,
               enableSlideOutPage: true,
             ),
             if (_showVideo && _playback != null)
