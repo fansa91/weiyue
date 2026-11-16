@@ -462,23 +462,24 @@ class _PicGrid extends StatelessWidget {
   List<WbPic> get pics => status.pics;
 
   /// 视频/直播帖的图片区只是兜底呈现（解析层已剔除混入的封面/视频帧，
-  /// 漏网时到这里）：不标「长图」、点图进详情走视频，不进长图阅读器。
-  /// 判据走长图准入收口：本级或转发原帖任一含视频/直播即拦截
-  ///（见 core/long_image.dart 的 statusAllowsLongImage）。
+  /// 漏网时到这里）：不标「长图」；点图仍开查看器但不许长图化
+  /// （见 _onTapPic）。判据走长图准入收口：本级或转发原帖任一含
+  /// 视频/直播即拦截（见 core/long_image.dart 的 statusAllowsLongImage）。
   bool get _isVideoPost => !statusAllowsLongImage(status);
 
   void _onTapPic(BuildContext context, int i, ImageQualityPref imageQuality) {
-    if (_isVideoPost) {
-      openDetail(context, status);
-    } else {
-      openPicViewer(
-        context,
-        pics,
-        i,
-        imageQuality: imageQuality,
-        allowLongImage: statusAllowsLongImage(status),
-      );
-    }
+    // 含视频的帖子（含图文+视频混合帖）：图片照常打开查看器预览，
+    // 只是不许长图化（allowLongImage=false → 走图库，漏网的视频帧
+    // 也只当普通图看，不会进长图阅读器）。旧行为是点图进详情，
+    // 详情里再点图又叠一层详情，图片永远预览不了（2026-11-16
+    // 真机报障），故改。
+    openPicViewer(
+      context,
+      pics,
+      i,
+      imageQuality: imageQuality,
+      allowLongImage: statusAllowsLongImage(status),
+    );
   }
 
   @override

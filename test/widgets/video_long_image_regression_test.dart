@@ -8,6 +8,7 @@ import 'package:weiyue/models/models.dart';
 import 'package:weiyue/screens/detail_screen.dart';
 import 'package:weiyue/widgets/long_image_viewer.dart';
 import 'package:weiyue/widgets/network_image.dart';
+import 'package:weiyue/widgets/photo_gallery.dart';
 import 'package:weiyue/widgets/status_card.dart';
 
 import '../helpers/fakes.dart';
@@ -56,7 +57,8 @@ void main() {
     });
   });
 
-  testWidgets('直播帖点图片：进详情页，不进长图阅读器', (tester) async {
+  testWidgets('直播帖点图片：进图库预览，不进长图阅读器也不叠详情',
+      (tester) async {
     await mockNetworkImagesFor(() async {
       const status = WbStatus(
         id: 'lv1',
@@ -74,7 +76,56 @@ void main() {
       await tester.tap(_picImage());
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
-      expect(find.byType(DetailScreen), findsOneWidget);
+      // 2026-11-16 改：含视频帖点图开图库预览（禁长图化），
+      // 不再进详情（旧行为在详情里再点图会无限叠详情、图片没法看）。
+      expect(find.byType(PhotoGalleryScreen), findsOneWidget);
+      expect(find.byType(LongImageReader), findsNothing);
+      expect(find.byType(DetailScreen), findsNothing);
+    });
+  });
+
+  testWidgets('图文+视频混合帖：点图片进图库预览', (tester) async {
+    await mockNetworkImagesFor(() async {
+      const status = WbStatus(
+        id: 'mix1',
+        text: '图文加视频',
+        user: WbUser(id: 42, screenName: '测试博主'),
+        pics: [
+          WbPic(
+            pid: 'real1',
+            thumbnail: 'https://example.com/r1t.jpg',
+            bmiddle: 'https://example.com/r1m.jpg',
+            large: 'https://example.com/r1l.jpg',
+            width: 800,
+            height: 600,
+          ),
+          WbPic(
+            pid: 'real2',
+            thumbnail: 'https://example.com/r2t.jpg',
+            bmiddle: 'https://example.com/r2m.jpg',
+            large: 'https://example.com/r2l.jpg',
+            width: 800,
+            height: 600,
+          ),
+        ],
+        video: _video,
+      );
+      await tester.pumpWidget(wrapWithProviders(
+        const Scaffold(
+          body: SingleChildScrollView(
+            child: StatusCard(status: status, tappable: false),
+          ),
+        ),
+      ));
+      await tester.pump();
+      final firstPic = find.byWidgetPredicate(
+        (w) => w is NetImage && w.url == 'https://example.com/r1m.jpg',
+      );
+      expect(firstPic, findsOneWidget);
+      await tester.tap(firstPic);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.byType(PhotoGalleryScreen), findsOneWidget);
       expect(find.byType(LongImageReader), findsNothing);
     });
   });

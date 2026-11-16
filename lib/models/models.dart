@@ -585,6 +585,7 @@ class WbStatus {
     bool? liked,
     bool? favorited,
     WbVote? vote,
+    List<WbPic>? pics,
   }) {
     return WbStatus(
       id: id,
@@ -601,7 +602,7 @@ class WbStatus {
       readsCount: readsCount,
       liked: liked ?? this.liked,
       favorited: favorited ?? this.favorited,
-      pics: pics,
+      pics: pics ?? this.pics,
       video: video ?? this.video,
       isLongText: isLongText ?? this.isLongText,
       retweeted: retweeted,

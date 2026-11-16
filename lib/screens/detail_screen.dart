@@ -85,7 +85,20 @@ class _DetailScreenState extends State<DetailScreen>
     // 详情刷新（列表来的卡可能字段不全）
     try {
       final full = await svc.getStatus(id);
-      if (mounted && full.id.isNotEmpty) setState(() => _status = full);
+      if (mounted && full.id.isNotEmpty) {
+        // 媒体防丢：详情接口的返回形态与列表不同（图文+视频混合帖
+        // 尤甚），刷新结果若把列表侧已有的视频/图片弄丢了，保留
+        // 列表侧的——否则详情页视频区整块消失、图片也点不开
+        // （2026-11-16 真机报障：混合帖图片和视频都无法预览）。
+        var merged = full;
+        if (!merged.hasVideo && _status.hasVideo) {
+          merged = merged.copyWith(video: _status.video);
+        }
+        if (merged.pics.isEmpty && _status.pics.isNotEmpty) {
+          merged = merged.copyWith(pics: _status.pics);
+        }
+        setState(() => _status = merged);
+      }
     } catch (_) {}
     // 长文补全
     if (_status.isLongText) {

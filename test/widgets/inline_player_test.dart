@@ -8,6 +8,7 @@ import 'package:weiyue/models/models.dart';
 import 'package:weiyue/screens/detail_screen.dart';
 import 'package:weiyue/services/settings_service.dart';
 import 'package:weiyue/widgets/inline_player.dart';
+import 'package:weiyue/widgets/network_image.dart';
 
 import '../helpers/fakes.dart';
 
@@ -85,6 +86,14 @@ class _VideoDetailFakeService extends FakeWeiyueService {
   @override
   Future<WbStatus> getStatus(String id) async => makeStatus(
       id: id, text: '详情全文内容', comments: 122, attitudes: 881, video: true);
+}
+
+/// 详情刷新丢媒体的假服务：getStatus 返回无视频、无图片的帖
+///（模拟详情接口返回形态与列表不同、媒体字段缺失）。
+class _MediaDroppingFakeService extends FakeWeiyueService {
+  @override
+  Future<WbStatus> getStatus(String id) async =>
+      makeStatus(id: id, text: '详情全文内容（媒体缺失）');
 }
 
 void main() {
@@ -227,6 +236,37 @@ void main() {
         findsOneWidget,
       );
       expect(find.byIcon(Icons.high_quality_outlined), findsOneWidget);
+    });
+  });
+
+  testWidgets('DetailScreen 刷新丢媒体：保留入口帖的视频与图片（混合帖回归）',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final settings = await tester.runAsync(() async {
+      final s = SettingsService();
+      await s.init();
+      return s;
+    });
+    await mockNetworkImagesFor(() async {
+      final fake = FakePlayback();
+      await tester.pumpWidget(wrapWithProviders(
+        DetailScreen(
+          // 入口帖：图文+视频混合帖（2 图 + 视频）
+          status: makeStatus(id: '10', text: '混合帖', pics: 2, video: true),
+          inlinePlaybackFactory: _factoryOf(fake),
+        ),
+        weibo: _MediaDroppingFakeService(),
+        settings: settings,
+      ));
+      await _settle(tester);
+      // 详情刷新返回丢了媒体，合并后视频播放器与图片都还在
+      expect(find.byType(InlineVideoPlayer), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is NetImage && w.url == 'https://example.com/m0.jpg',
+        ),
+        findsOneWidget,
+      );
     });
   });
 }
