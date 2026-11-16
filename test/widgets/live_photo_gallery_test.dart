@@ -75,6 +75,13 @@ class FakeLivePlayback implements LivePlayback {
       const SizedBox.expand(key: ValueKey('fake-live-surface'));
 }
 
+/// 视频层透明度：0=已挂载待命（纹理/首帧就绪、不可见），1=播放中可见。
+/// 视频层在预加载打开成功后即挂载（防开播黑屏），故「在不在树里」
+/// 不再区分播/停，改断言透明度。
+double _layerOpacity(WidgetTester tester) => tester
+    .widget<Opacity>(find.byKey(const ValueKey('live-video-layer')))
+    .opacity;
+
 WbStatus _statusWithPics(List<WbPic> pics) => WbStatus(
   id: 's-live',
   mblogid: 'BidLive',
@@ -166,10 +173,12 @@ void main() {
       ]);
       expect(fake.playCount, 1);
       expect(find.byKey(const ValueKey('fake-live-surface')), findsOneWidget);
-      // 松手：停播、视频层撤下回静图
+      expect(_layerOpacity(tester), 1.0);
+      // 松手：停播、视频层转透明待命回静图（不卸载，纹理留着防再播黑屏）
       await gesture.up();
       await tester.pump();
-      expect(find.byKey(const ValueKey('fake-live-surface')), findsNothing);
+      expect(find.byKey(const ValueKey('fake-live-surface')), findsOneWidget);
+      expect(_layerOpacity(tester), 0.0);
       expect(fake.pauseCount, greaterThanOrEqualTo(1));
     });
   });
@@ -255,7 +264,9 @@ void main() {
       );
       await tester.pump();
       expect(find.byKey(const ValueKey('live-badge-icon-play')), findsOneWidget);
-      expect(find.byKey(const ValueKey('fake-live-surface')), findsNothing);
+      // 预加载已挂载视频层待命（透明不可见）
+      expect(find.byKey(const ValueKey('fake-live-surface')), findsOneWidget);
+      expect(_layerOpacity(tester), 0.0);
 
       // 点标识开播：打开主地址、视频层出现、图标变暂停
       await tester.tap(find.byKey(const ValueKey('gallery-live-badge')));
@@ -269,12 +280,12 @@ void main() {
         findsOneWidget,
       );
 
-      // 再点标识停播：暂停、视频层撤下、图标回播放
+      // 再点标识停播：暂停、视频层转透明待命、图标回播放
       await tester.tap(find.byKey(const ValueKey('gallery-live-badge')));
       await tester.pump();
       await tester.pump();
       expect(fake.pauseCount, greaterThanOrEqualTo(1));
-      expect(find.byKey(const ValueKey('fake-live-surface')), findsNothing);
+      expect(_layerOpacity(tester), 0.0);
       expect(find.byKey(const ValueKey('live-badge-icon-play')), findsOneWidget);
     });
   });
@@ -314,17 +325,17 @@ void main() {
       expect(fake.playCount, 1);
       expect(find.byKey(const ValueKey('fake-live-surface')), findsOneWidget);
 
-      // 移出：停播回静图
+      // 移出：停播回静图（视频层转透明待命）
       await mouse.moveTo(const Offset(10, 10));
       await tester.pump();
       await tester.pump();
       expect(fake.pauseCount, greaterThanOrEqualTo(1));
-      expect(find.byKey(const ValueKey('fake-live-surface')), findsNothing);
+      expect(_layerOpacity(tester), 0.0);
       await mouse.removePointer();
     });
   });
 
-  testWidgets('预加载：成为当前页即后台打开主地址待命（不播放、不上层），点标识直接续播不重复打开',
+  testWidgets('预加载：成为当前页即后台打开主地址待命（不播放、层透明），点标识直接续播不重复打开',
       (tester) async {
     final fake = FakeLivePlayback();
     await mockNetworkImagesFor(() async {
@@ -339,17 +350,20 @@ void main() {
       );
       await tester.pump();
       await tester.pump();
-      // 预加载已打开主地址，但没播放、视频层不上（静图照常显示）
+      // 预加载已打开主地址，但没播放；视频层已挂载但透明（纹理待命、
+      // 静图照常显示）——播放时只切透明度，不临时建层闪黑
       expect(fake.openedUrls, [_livePic.liveVideoUrl]);
       expect(fake.playCount, 0);
-      expect(find.byKey(const ValueKey('fake-live-surface')), findsNothing);
-      // 点标识播放：走预加载续播，不再重复打开地址，视频层直接上
+      expect(find.byKey(const ValueKey('fake-live-surface')), findsOneWidget);
+      expect(_layerOpacity(tester), 0.0);
+      // 点标识播放：走预加载续播，不再重复打开地址，层透明度切 1
       await tester.tap(find.byKey(const ValueKey('gallery-live-badge')));
       await tester.pump();
       await tester.pump();
       expect(fake.openedUrls, [_livePic.liveVideoUrl]);
       expect(fake.playCount, 1);
       expect(find.byKey(const ValueKey('fake-live-surface')), findsOneWidget);
+      expect(_layerOpacity(tester), 1.0);
     });
   });
 

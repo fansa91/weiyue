@@ -106,6 +106,23 @@ void main() {
     });
   });
 
+  testWidgets('长图阅读器：缩放体撑满查看区（单图居中回归）', (tester) async {
+    await mockNetworkImagesFor(() async {
+      await tester.pumpWidget(const MaterialApp(
+        home: LongImageReader(pics: [_normalPic]),
+      ));
+      await tester.pump();
+      // 缩放体必须吃紧约束撑满 body（800×600 测试面减 56 AppBar）：
+      // 手势图在宽松约束下会按图片尺寸缩成小盒被 Stack 锚在左上，
+      // 真机表现为单图预览不居中（2026-11-16 报障）；图库靠 PageView
+      // 紧约束天然居中，阅读器靠 SizedBox.expand 对齐。
+      final body = find.byKey(const ValueKey('long-image-zoom-body'));
+      expect(body, findsOneWidget);
+      expect(tester.getSize(body), const Size(800, 544));
+      expect(tester.getTopLeft(body), const Offset(0, 56));
+    });
+  });
+
   testWidgets('长图阅读器：单张实况图走 LivePhotoView（带 LIVE 标识）',
       (tester) async {
     await mockNetworkImagesFor(() async {

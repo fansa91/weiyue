@@ -232,7 +232,8 @@ class _LivePhotoViewState extends State<LivePhotoView> {
 
   /// 预加载：后台打开首个候选并暂停待命（open 本身即暂停打开），
   /// 首帧解码就绪；打开失败的候选由 _openCandidate 自动顺延，
-  /// 全部失败标记 _dead 回静图。不显示视频层、不播放。
+  /// 全部失败标记 _dead 回静图。视频层随打开成功挂载但透明度 0
+  /// 不可见、不播放（见 build 的 live-video-layer）。
   void _preload() {
     if (!widget.active || _dead || _candidates.isEmpty) return;
     if (_playback != null || _preloading) return;
@@ -296,6 +297,10 @@ class _LivePhotoViewState extends State<LivePhotoView> {
     if (_wantPlay) {
       setState(() => _showVideo = true);
       await playback.play();
+    } else {
+      // 待命态：重建一次让视频层提前挂载（透明，见 build）——纹理在
+      // 预加载期就建好并解码首帧，播放时只切透明度，不再临时建层。
+      setState(() {});
     }
   }
 
@@ -407,9 +412,20 @@ class _LivePhotoViewState extends State<LivePhotoView> {
               inPageView: widget.inPageView,
               enableSlideOutPage: true,
             ),
-            if (_showVideo && _playback != null)
+            // 视频层在候选打开成功后即挂载（预加载完成时，见
+            // _openCandidate 的待命重建），未播放时透明度 0 藏在静图
+            // 之上：纹理提前建好、首帧已解码，播放只把透明度切到 1。
+            // 若等到播放时才挂载，纹理新建+首帧渲染的空窗会闪黑
+            // （v0.2.6 真机实证：仅预加载 open 不挂层仍黑屏）。
+            if (_playback != null && _candidateIndex >= 0)
               Positioned.fill(
-                child: IgnorePointer(child: _playback!.buildSurface()),
+                child: IgnorePointer(
+                  child: Opacity(
+                    key: const ValueKey('live-video-layer'),
+                    opacity: _showVideo ? 1.0 : 0.0,
+                    child: _playback!.buildSurface(),
+                  ),
+                ),
               ),
             _buildBadge(),
           ],

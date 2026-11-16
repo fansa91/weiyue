@@ -239,7 +239,16 @@ class _LongImageReaderState extends State<LongImageReader> {
           enabled: !_scrollMode,
           child: Stack(
           children: [
-            _scrollMode ? _buildScrollBody(pic) : _buildZoomBody(pic),
+            // 缩放体必须吃紧约束撑满查看区：手势模式 ExtendedImage 在
+            // Stack 的宽松约束下会按图片自身尺寸收缩成小盒、被 Stack
+            // 锚在左上（单图预览不居中的根因；图库靠 PageView 的紧约束
+            // 天然居中）。SizedBox.expand 与图库页同为全页紧约束。
+            _scrollMode
+                ? _buildScrollBody(pic)
+                : SizedBox.expand(
+                    key: const ValueKey('long-image-zoom-body'),
+                    child: _buildZoomBody(pic),
+                  ),
             // 桌面/宽屏：查看区两侧上一张/下一张按钮（与图库统一；
             // AppBar 上的小箭头保留，窄屏仍可用）。
             if (multi && viewerShowsSideButtons(context))
