@@ -21,8 +21,8 @@ abstract class InlinePlayback {
   Stream<int?> get widthStream;
   Stream<int?> get heightStream;
 
-  /// 播放/暂停状态流：驱动预览框暂停按钮图标与控制层自动隐藏
-  ///（暂停时控制层常显，不自动隐藏）。
+  /// 播放/暂停状态流：驱动自有附加层自动隐藏
+  ///（暂停时附加层常显，不自动隐藏）。
   Stream<bool> get playingStream;
 
   Future<void> open(String url);
@@ -31,11 +31,10 @@ abstract class InlinePlayback {
 
   Future<void> pause();
 
-  Future<void> toggleFullscreen();
-
   Future<void> dispose();
 
-  /// 渲染视频画面（含 media_kit 默认控制层：播放/暂停/进度/音量/全屏）。
+  /// 渲染视频画面（含 media_kit 默认控制层：播放/暂停/进度/音量/全屏，
+  /// 全屏走默认层的全屏按钮，进出全屏回调仍透传给 Video）。
   Widget buildSurface();
 }
 
@@ -67,7 +66,6 @@ class _MediaKitPlayback implements InlinePlayback {
 
   final Player _player = Player();
   late final VideoController _controller = VideoController(_player);
-  final _videoKey = GlobalKey<VideoState>();
 
   @override
   Stream<int?> get widthStream => _player.stream.width;
@@ -88,17 +86,11 @@ class _MediaKitPlayback implements InlinePlayback {
   Future<void> pause() => _player.pause();
 
   @override
-  Future<void> toggleFullscreen() async {
-    await _videoKey.currentState?.toggleFullscreen();
-  }
-
-  @override
   Future<void> dispose() => _player.dispose();
 
   @override
   Widget buildSurface() {
     return Video(
-      key: _videoKey,
       controller: _controller,
       onEnterFullscreen: _onEnterFullscreen,
       onExitFullscreen: _onExitFullscreen,
@@ -108,9 +100,11 @@ class _MediaKitPlayback implements InlinePlayback {
 
 /// 详情页内嵌视频播放器：进入详情按设置自动播放（设置关时显示
 /// 封面 + 大播放按钮，点击才建播放器开播）；带画质切换（playback_list
-/// 多档，默认按设置清晰度选档）与显式全屏按钮；左下角有暂停/续播
-/// 按钮，自有控制层在播放中 3 秒无操作后自动隐藏（暂停时常显），
-/// 点画面可唤回。
+/// 多档，默认按设置清晰度选档）。
+/// 播放/暂停、进度、音量、全屏一律用 media_kit 默认控制层这一套，
+/// 不再自绘同名按钮（此前自绘的暂停/全屏与默认层重复成两套）；
+/// 自有附加层只放默认层没有的画质切换与下载，播放中 3 秒无操作
+/// 后自动隐藏（暂停时常显），点画面可唤回。
 /// 移动端全屏方向按视频实际宽高决定：横屏视频全屏转横屏，
 /// 竖屏视频全屏保持竖屏；桌面沿用 media_kit 默认全屏实现。
 /// 播放器创建/打开失败（如运行环境缺原生库）时兜底回封面态可重试，
@@ -144,10 +138,10 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
   bool _started = false;
   bool _failed = false;
 
-  /// 播放中：播放流的状态；暂停按钮图标与自动隐藏据此决定。
+  /// 播放中：播放流的状态；附加层自动隐藏据此决定。
   bool _isPlaying = false;
 
-  /// 预览框自有控制层（画质/全屏/暂停按钮）是否可见。
+  /// 自有附加层（画质/下载按钮）是否可见。
   bool _controlsVisible = true;
 
   /// 控制层自动隐藏延时：播放中无操作 3 秒后隐藏，点画面可唤回。
@@ -255,20 +249,6 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
       setState(() => _controlsVisible = true);
     }
     _scheduleHide();
-  }
-
-  /// 暂停/续播切换：暂停后控制层常显，续播后重新计时隐藏。
-  Future<void> _togglePause() async {
-    final playback = _playback;
-    if (playback == null) return;
-    if (_isPlaying) {
-      await playback.pause();
-      _hideTimer?.cancel();
-      if (mounted) setState(() => _controlsVisible = true);
-    } else {
-      await playback.play();
-      _showControls();
-    }
   }
 
   Future<void> _start({WbPlayback? quality}) async {
@@ -432,13 +412,14 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 点画面唤回控制层（Listener 只监听指针按下，不与 media_kit
-        // 自身手势抢夺，画质/全屏/暂停按钮在其上层，不触发这里）。
+        // 点画面唤回附加层（Listener 只监听指针按下，不与 media_kit
+        // 自身手势抢夺，画质/下载按钮在其上层，不触发这里）。
         Listener(
           onPointerDown: (_) => _showControls(),
           child: _playback!.buildSurface(),
         ),
-        // 自有控制层：播放中 3 秒无操作自动隐藏，暂停时常显。
+        // 自有附加层（只有默认控制层没有的画质/下载；播放/暂停/全屏
+        // 不在这里重复画）：播放中 3 秒无操作自动隐藏，暂停时常显。
         if (_controlsVisible) ...[
           Positioned(
             top: 6,
@@ -482,19 +463,6 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
                     ),
                   ),
                 if (playbackList.length > 1) const SizedBox(width: 6),
-                // 显式全屏按钮（不依赖默认控件是否显示），走按比例定向逻辑
-                _circleButton(
-                  child: IconButton(
-                    icon: const Icon(
-                      Icons.fullscreen,
-                      color: Colors.white,
-                      size: 22,
-                    ),
-                    tooltip: '全屏',
-                    onPressed: () => _playback?.toggleFullscreen(),
-                  ),
-                ),
-                const SizedBox(width: 6),
                 // 下载视频（按设置默认清晰度取档，与播放默认档一致）
                 _circleButton(
                   child: VideoDownloadButton(
@@ -503,22 +471,6 @@ class _InlineVideoPlayerState extends State<InlineVideoPlayer> {
                   ),
                 ),
               ],
-            ),
-          ),
-          Positioned(
-            left: 6,
-            bottom: 6,
-            child: _circleButton(
-              child: IconButton(
-                key: const ValueKey('inline-player-pause'),
-                icon: Icon(
-                  _isPlaying ? Icons.pause : Icons.play_arrow,
-                  color: Colors.white,
-                  size: 22,
-                ),
-                tooltip: _isPlaying ? '暂停' : '播放',
-                onPressed: _togglePause,
-              ),
             ),
           ),
         ],

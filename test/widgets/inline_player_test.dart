@@ -21,7 +21,6 @@ Future<void> _settle(WidgetTester tester) async {
 class FakePlayback implements InlinePlayback {
   int openCalls = 0;
   String? lastUrl;
-  int toggleCalls = 0;
   int playCalls = 0;
   int pauseCalls = 0;
   bool disposed = false;
@@ -59,11 +58,6 @@ class FakePlayback implements InlinePlayback {
   }
 
   @override
-  Future<void> toggleFullscreen() async {
-    toggleCalls++;
-  }
-
-  @override
   Future<void> dispose() async {
     disposed = true;
   }
@@ -94,7 +88,7 @@ class _VideoDetailFakeService extends FakeWeiyueService {
 }
 
 void main() {
-  testWidgets('InlineVideoPlayer 自动播放开：进入即开播，全屏/画质按钮在位',
+  testWidgets('InlineVideoPlayer 自动播放开：进入即开播，附加层只有画质/下载',
       (tester) async {
     await mockNetworkImagesFor(() async {
       final fake = FakePlayback();
@@ -110,13 +104,15 @@ void main() {
       expect(fake.openCalls, 1);
       expect(fake.lastUrl, contains('v720'));
       expect(find.text('FakeSurface'), findsOneWidget);
-      // 显式全屏按钮与画质按钮（假数据两档）在位
-      expect(find.byIcon(Icons.fullscreen), findsOneWidget);
+      // 附加层：画质按钮（假数据两档）与下载按钮在位
       expect(find.byIcon(Icons.high_quality_outlined), findsOneWidget);
-      // 点全屏按钮走后端切换
-      await tester.tap(find.byIcon(Icons.fullscreen));
-      await _settle(tester);
-      expect(fake.toggleCalls, 1);
+      expect(find.byIcon(Icons.download_outlined), findsOneWidget);
+      // 播放/暂停、全屏不自绘（归 media_kit 默认控制层一套）：
+      // 附加层里没有暂停键、没有全屏/暂停/播放图标
+      expect(find.byKey(const ValueKey('inline-player-pause')), findsNothing);
+      expect(find.byIcon(Icons.fullscreen), findsNothing);
+      expect(find.byIcon(Icons.pause), findsNothing);
+      expect(find.byIcon(Icons.play_arrow), findsNothing);
     });
   });
 
@@ -143,30 +139,7 @@ void main() {
     });
   });
 
-  testWidgets('InlineVideoPlayer 暂停按钮：点暂停/续播走后端，图标跟随状态', (tester) async {
-    await mockNetworkImagesFor(() async {
-      final fake = FakePlayback();
-      await tester.pumpWidget(wrapWithProviders(
-        InlineVideoPlayer(
-          status: makeStatus(id: 'v1', video: true),
-          autoplay: true,
-          playbackFactory: _factoryOf(fake),
-        ),
-      ));
-      await _settle(tester);
-      expect(find.byIcon(Icons.pause), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('inline-player-pause')));
-      await _settle(tester);
-      expect(fake.pauseCalls, 1);
-      expect(find.byIcon(Icons.play_arrow), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('inline-player-pause')));
-      await _settle(tester);
-      expect(fake.playCalls, 1);
-      expect(find.byIcon(Icons.pause), findsOneWidget);
-    });
-  });
-
-  testWidgets('InlineVideoPlayer 控制层自动隐藏：播放 3 秒后隐藏，点画面唤回，暂停时常显',
+  testWidgets('InlineVideoPlayer 附加层自动隐藏：播放 3 秒后隐藏，点画面唤回，暂停时常显',
       (tester) async {
     await mockNetworkImagesFor(() async {
       final fake = FakePlayback();
@@ -178,20 +151,25 @@ void main() {
         ),
       ));
       await _settle(tester);
-      expect(find.byIcon(Icons.fullscreen), findsOneWidget);
-      // 播放中 3 秒无操作 -> 控制层隐藏
+      expect(find.byIcon(Icons.high_quality_outlined), findsOneWidget);
+      // 播放中 3 秒无操作 -> 附加层隐藏
       await tester.pump(const Duration(seconds: 4));
-      expect(find.byIcon(Icons.fullscreen), findsNothing);
-      expect(find.byKey(const ValueKey('inline-player-pause')), findsNothing);
+      expect(find.byIcon(Icons.high_quality_outlined), findsNothing);
+      expect(find.byIcon(Icons.download_outlined), findsNothing);
       // 点画面唤回
       await tester.tap(find.text('FakeSurface'));
       await _settle(tester);
-      expect(find.byIcon(Icons.fullscreen), findsOneWidget);
-      // 暂停后即使 4 秒过去也不隐藏
-      await tester.tap(find.byKey(const ValueKey('inline-player-pause')));
+      expect(find.byIcon(Icons.high_quality_outlined), findsOneWidget);
+      // 暂停（经 media_kit 默认层操作，状态流回传）后即使 4 秒也不隐藏
+      await fake.pause();
       await _settle(tester);
       await tester.pump(const Duration(seconds: 4));
-      expect(find.byIcon(Icons.fullscreen), findsOneWidget);
+      expect(find.byIcon(Icons.high_quality_outlined), findsOneWidget);
+      // 续播后恢复自动隐藏
+      await fake.play();
+      await _settle(tester);
+      await tester.pump(const Duration(seconds: 4));
+      expect(find.byIcon(Icons.high_quality_outlined), findsNothing);
     });
   });
 
@@ -248,7 +226,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.byIcon(Icons.fullscreen), findsOneWidget);
+      expect(find.byIcon(Icons.high_quality_outlined), findsOneWidget);
     });
   });
 }
